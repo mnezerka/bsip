@@ -592,14 +592,14 @@ class AuthenticationHeader(Header, dict):
 		Header.__init__(self, name, body)
 		dict.__init__(self)
 
-		self.__scheme = None
+		self._scheme = None
 
 		if not body is None:
 			# parse address
 			(scheme, sep, parameters) = body.partition(' ')
 			
 			# parse parameters
-			self.__scheme = scheme
+			self._scheme = scheme
 			if len(sep) > 0:
 				params = parameters.split(',')
 				for param in params:
@@ -684,15 +684,15 @@ class AuthenticationHeader(Header, dict):
 
 	def setResponse(self, response):
 		"""Sets the Response of the AuthenticationHeader to the new response parameter value."""
-		self.setParameter(AuthenticationHeader.PARAM_RESPONSE, response)
+		self[Header.PARAM_RESPONSE] = response
 
 	def getScheme(self):
 		"""Returns the scheme of the Response information for this AuthenticationHeader."""
-		return self.__scheme
+		return self._scheme
 
 	def setScheme(self, scheme):
 		"""Sets the scheme of the Response information for this AuthenticationHeader."""
-		self.__scheme = scheme
+		self._scheme = scheme
 
 	def getStale(self):
 		"""Returns the boolean value of the stale parameter of this WWWAuthenticateHeader."""
@@ -716,13 +716,13 @@ class AuthenticationHeader(Header, dict):
 
 	def setUserName(self, userName):
 		"""Sets the Username of the AuthenticationHeader to the username parameter value."""
-		self.setParameter(AuthenticationHeader.PARAM_USERNAME, userName)
+		self[Header.PARAM_USERNAME] = userName
 
 	def __str__(self):
-		if self.__scheme is None:
+		if self._scheme is None:
 			raise ESipMessageException('Authorization scheme is mandatory')
 		result = self.getName() + ': '
-		result += self.__scheme
+		result += self._scheme
 	
 		params = ''
 		for p in self:

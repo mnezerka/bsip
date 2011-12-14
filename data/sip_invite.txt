@@ -1,0 +1,8 @@
+INVITE sip:bob@127.0.0.1:5060 SIP/2.0
+From: "Alice"<sip:alice@atlanta.com>;tag=12345
+To: "Bob"<sip:bob@privoxy.com>
+Call-Id: 345
+CSeq: 1 INVITE
+Contact: "Alice"<sip:alice@127.0.0.1:5060>
+My-Header: my header value
+
