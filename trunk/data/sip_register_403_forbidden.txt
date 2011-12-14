@@ -1,0 +1,8 @@
+SIP/2.0 403 Forbidden - user unknown
+f:"ITSY000001"<sip:ITSY000001@brn38.iit.ims>;tag=tagfromheader
+t:"ITSY000001"<sip:ITSY000001@brn38.iit.ims>;tag=1521286745
+v:SIP/2.0/UDP 64.2.176.171:5060;branch=z9hG4bKhwpwdwbk
+i:0493126047@xyz
+CSeq:1 REGISTER
+l:0
+

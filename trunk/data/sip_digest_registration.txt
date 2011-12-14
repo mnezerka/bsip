@@ -1,0 +1,52 @@
+REGISTER sip:brn38.iit.ims SIP/2.0
+Via: SIP/2.0/UDP 64.2.190.2:10001;branch=z9hG4bKaioerknw
+From: ITSY000001 <sip:ITSY000001@brn38.iit.ims>;tag=z9hG4bKvlxhgxrt
+To: ITSY000001 <sip:ITSY000001@brn38.iit.ims>
+Call-ID: 5364515643@64.2.190.2
+CSeq: 1 REGISTER
+Contact: <sip:64.2.190.2:10001>
+Max-Forwards: 70
+User-Agent: IMS 7.x SIP TestClient
+Expires: 1900
+Content-Length: 0
+Authorization: Digest username="ITSY000001.priv@brn38.iit.ims",realm="brn38.iit.ims",uri="sip:brn38.iit.ims",nonce="",response=""
+
+SIP/2.0 401 Unauthorized
+v:SIP/2.0/UDP 64.2.190.2:10001;branch=z9hG4bKaioerknw
+f:"ITSY000001"<sip:ITSY000001@brn38.iit.ims>;tag=z9hG4bKvlxhgxrt
+t:"ITSY000001"<sip:ITSY000001@brn38.iit.ims>;tag=to_tag_00005a9923ee
+i:5364515643@64.2.190.2
+CSeq:1 REGISTER
+WWW-Authenticate:Digest realm="brn38.iit.ims",nonce="3463a5144cebc5bf1035bfdb68070ae65e8224e310eff70b6f0faf",qop="auth-int"
+l:0
+
+
+REGISTER sip:brn38.iit.ims SIP/2.0
+Via: SIP/2.0/UDP 64.2.190.2:10001;branch=z9hG4bKsxsbmcoe
+From: ITSY000001 <sip:ITSY000001@brn38.iit.ims>;tag=z9hG4bKmqryaefc
+To: ITSY000001 <sip:ITSY000001@brn38.iit.ims>
+Call-ID: 1627472893@64.2.190.2
+CSeq: 1 REGISTER
+Contact: <sip:64.2.190.2:10001>
+Max-Forwards: 70
+User-Agent: IMS 7.x SIP TestClient
+Expires: 1900
+Content-Length: 0
+Authorization: Digest username="ITSY000001.priv@brn38.iit.ims",realm="brn38.iit.ims",nonce="3463a5144cebc5bf1035bfdb68070ae65e8224e310eff70b6f0faf",uri="sip:brn38.iit.ims",response="2cb32fb0d786d48de56cbe77f519db8a",qop="auth-int",nc=2,cnonce="db85819f42a59c46ce238a99aa0baa92",algorithm="MD5"
+
+
+SIP/2.0 200 OK
+v:SIP/2.0/UDP 64.2.190.2:10001;branch=z9hG4bKsxsbmcoe
+f:"ITSY000001"<sip:ITSY000001@brn38.iit.ims>;tag=z9hG4bKmqryaefc
+t:"ITSY000001"<sip:ITSY000001@brn38.iit.ims>;tag=to_tag_000047771148
+i:1627472893@64.2.190.2
+CSeq:1 REGISTER
+m:<sip:64.2.190.2:10001>;expires=1900
+Path:<sip:pcscf1.brn38.iit.ims:5070;lr;transport=SCTP>
+Service-Route:<sip:originating@scscf1.brn38.iit.ims:5090;reg-id=200122;lskpmc=S03;lr;transport=SCTP>
+Authentication-Info:nextnonce="5fbd86bd4cebc5bf1035bf8a7b619cbd5ed80fc41e45f08754860d"
+P-com.siemens.maximum-chat-size:1300
+P-com.siemens.maximum-IM-size:1300
+P-com.siemens.chat:direct
+P-Associated-URI:<sip:ITSY000001@brn38.iit.ims>
+l:0
