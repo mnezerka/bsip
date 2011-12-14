@@ -7,3 +7,5 @@ Following points are waiting for implementation
  * digest authentication
  * both client and server transactions
  * dialogs support
+ * check: If more than one Via header field value is present in a response, the UAC SHOULD discard the message.
+ * processing of 3xx responses
