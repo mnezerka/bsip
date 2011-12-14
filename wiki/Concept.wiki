@@ -1,13 +1,9 @@
-#summary One-sentence summary of this page.
+#summary Basic overview of the project
 
-= Introduction =
+= TODO =
 
-Add your content here.
-
-
-= Details =
-
-Add your content here.  Format your content with:
-  * Text in *bold* or _italic_
-  * Headings, paragraphs, and lists
-  * Automatic links to other wiki pages
+Following points are waiting for implementation
+ * predefined route set and outbound proxy used as singe route in route set
+ * digest authentication
+ * both client and server transactions
+ * dialogs support
