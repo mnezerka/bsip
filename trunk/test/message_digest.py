@@ -1,7 +1,9 @@
+#!/usr/bin/python
+
 import sys
 import time
 from sipmessage import *
-from sipstack import SipStack, SipListeningPoint, SipListener
+from sipstack import User, SipStack, SipListeningPoint, SipListener, Authenticator
 
 
 SERVER_IP = '127.0.0.1'
@@ -10,12 +12,12 @@ CLIENT_IP = SERVER_IP
 CLIENT_PORT = SERVER_PORT + 1
 OUTBOUND_PROXY = SERVER_IP + ':' + str(SERVER_PORT)
 
-class User1:
-	userName = 'ITSY000001';
-	domain= 'brn38.iit.ims';
-	displayName = 'ITSY000001';
-	authUserName = 'ITSY000001.priv@brn38.iit.ims';
-	authPassword = '33800000001';
+user1 = User()
+user1.setUserName('ITSY000001')
+user1.setDisplayName('ITSY000001')
+user1.setSipDomain('brn38.iit.ims')
+user1.setAuthUserName('ITSY000001.priv@brn38.iit.ims')
+user1.setAuthPassword('33800000001')
 
 class SipClient(SipListener):
 
@@ -23,6 +25,7 @@ class SipClient(SipListener):
 		
 		self.s = SipStack({ SipStack.PARAM_STACK_NAME: "ahoj", SipStack.PARAM_OUTBOUND_PROXY: OUTBOUND_PROXY})
 		self.msgFactory = MessageFactory()
+		self.headerFactory = HeaderFactory()
 
 	def run(self):
 		self.r = SipRequest()
@@ -71,7 +74,7 @@ class SipClient(SipListener):
 			# create authorization header
 			authHeader = WwwAuthenticateHeader()
 			authHeader.setScheme('Digest')
-			authHeader.setRealm(User1.domain)
+			authHeader.setRealm(user1.getSipDomain())
 			authHeader.setQop('int,auth-int')
 			authHeader.setNonce('somenonce')
 			authHeader.setOpaque('someopaque')
@@ -92,17 +95,47 @@ class SipClient(SipListener):
 		print "Incoming response: %d %s" % (response.getStatusCode(),  response.getReasonPhrase())
 		if response.getStatusCode() == 401:
 
-			TODO: Authorization.getAuthorization('Digest', User1.uri, requestBody, authHeader, userCredentials)
+			authHeader = response.getHeaderByType(WwwAuthenticateHeader)
 
-			# create authorization header
-#			authorizationHeader = AuthorizationHeader()
-#			authorizationHeader.setScheme('Digest')
-#			authorizationHeader.setUserName(User1.authUserName)
-#			authorizationHeader.setRealm(User1.domain)
-#			authorizationHeader.setUri(User1.userName + "@" + User1.domain)
-#			authorizationHeader.setNonce('')
-#			authorizationHeader.setResponse('')
-#			self.r.addHeader(authorizationHeader)
+			if authHeader is None:
+				raise ESipException('Could not find WWWAuthenticate or ProxyAuthenticate header');
+
+			# Remove all authorization headers from the request (we'll re-add them from cache)
+			self.r.removeHeadersByType(AuthorizationHeader)
+
+			# Increment cseq
+			cSeq = self.r.getHeaderByType(SipCSeqHeader)
+                	cSeq.setSeqNumber(cSeq.getSeqNumber() + 1l)
+
+			# set new tag and branch
+			fromHeader = self.r.getHeaderByType(SipFromHeader)
+			fromHeader.setTag(SipUtils.generateTag())
+			topVia = self.r.getTopmostViaHeader()
+			topVia.setBranch(SipUtils.generateBranchId())
+
+			realm = authHeader.getRealm()
+			authorization = None;
+
+			# we haven't yet authenticated this realm since we were started.
+			content = self.r.getContent()
+			if content is None:
+				content = ''
+
+			#accountManager = AccountManager()
+
+			authenticator = Authenticator(self.headerFactory)
+
+			authorization = authenticator.getAuthorization(
+				self.r.getMethod(),
+				str(self.r.getRequestUri()),
+				content,
+				authHeader,
+				user1)
+
+			#print 'Created authorization header: %s' % str(authorization)
+			
+			self.r.addHeader(authorization)
+
 			self.s.sendRequest(self.r)
 
 		#print str(responseEvent.getResponse())
