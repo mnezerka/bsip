@@ -133,6 +133,49 @@ class SipUtils(object):
 		"""Generate a cryptographically random identifier"""
 		return SipUtils.generateBranchId()
 
+class HttpUtils():
+
+	@staticmethod
+	def parseHttpList(s):
+		"""Parse lists as described by RFC 2068 Section 2.
+
+		In particular, parse comma-separated lists where the elements of
+		the list may include quoted-strings. A quoted-string could
+		contain a comma. A non-quoted string could have quotes in the
+		middle. Neither commas nor quotes count if they are escaped.
+		Only double-quotes count, not single-quotes.
+		"""
+
+		res = []
+		part = ''
+		escape = quote = False
+
+		for cur in s:
+			if escape:
+				part += cur
+				escape = False
+				continue
+			if quote:
+				if cur == '\\':
+					escape = True
+					continue
+				elif cur == '"':
+					quote = False
+				part += cur
+				continue
+			if cur == ',':
+				res.append(part)
+				part = ''
+				continue
+			if cur == '"':
+				quote = True
+			part += cur
+
+		# append last part
+		if part:
+			res.append(part)
+			
+		return [part.strip() for part in res] 
 
 
 class Uri(dict):
@@ -518,6 +561,7 @@ class Header(object):
 	PARAM_BRANCH = 'branch';
 	PARAM_CARD = 'card';
 	PARAM_CAUSE = 'cause';
+	# If the server sent a qop-header in the WWW-Authenticate header, the client has to provide this value for HTTP digest auth. See the RFC for more details.
 	PARAM_CNONCE = 'cnonce';
 	PARAM_COOKIE = 'cookie';
 	PARAM_DIGEST = 'Digest';
@@ -533,10 +577,13 @@ class Header(object):
 	PARAM_MADDR = 'maddr';
 	PARAM_NC = 'nc';
 	PARAM_NEXT_NONCE = 'nextnonce';
+	# The nonce the server sent for digest auth, sent back by the client. A nonce should be unique for every 401 response for HTTP digest auth.
 	PARAM_NONCE = 'nonce';
+	# The nonce count value transmitted by clients if a qop-header is also transmitted. HTTP digest auth only.
 	PARAM_NONCE_COUNT = 'nc';
 	PARAM_NON_URGENT = 'non-urgent';
 	PARAM_NORMAL = 'normal';
+	# The opaque header from the server returned unchanged by the client. It is recommended that this string be base64 or hexadecimal data. Digest auth only.
 	PARAM_OPAQUE = 'opaque';
 	PARAM_OPTIONAL = 'optional';
 	PARAM_PASSWORD = 'password';
@@ -601,13 +648,13 @@ class AuthenticationHeader(Header, dict):
 			# parse parameters
 			self._scheme = scheme
 			if len(sep) > 0:
-				params = parameters.split(',')
+				params = HttpUtils.parseHttpList(parameters)
 				for param in params:
 					(key, sep, value) = param.partition('=')
 					if len(sep) == 0:
-						raise ESipMessageException()
+						raise ESipMessageException("Cannot parse parameter:" + param)
 					# remove quotes
-					value = value.replace('"', '')		
+					value = value.replace('"', '')
 					self[key.strip()] = value.strip()
 
 	# override method to handle quoting
@@ -750,6 +797,23 @@ class AuthorizationHeader(AuthenticationHeader):
 	This header field, along with Proxy-Authorization, breaks the general rules about multiple
 	header field values. Although not a comma- separated list, this header field name may be
 	present multiple times, and MUST NOT be combined into a single header line.
+
+	cnonce   - If the server sent a qop-header in the WWWAuthenticate header, the client has to
+	           provide this value for HTTP digest auth. See the RFC for more details.
+	nc       - The nonce count value transmitted by clients if a qop-header is also transmitted.
+	           HTTP digest auth only.
+	nonce    - The nonce the server sent for digest auth, sent back by the client. A nonce should be
+	           unique for every 401 response for HTTP digest auth.
+	opaque   - The opaque header from the server returned unchanged by the client. It is recommended
+	           that this string be base64 or hexadecimal data. Digest auth only.
+	password - When the authentication type is basic this is the password transmitted by the client, else None.
+	qop      - Indicates what "quality of protection" the client has applied to the message for HTTP digest auth.
+	realm    - This is the server realm sent back for HTTP digest auth.
+	response - A string of 32 hex digits computed as defined in RFC 2617, which proves that the user knows
+	           a password. Digest auth only.
+	uri      - The URI from Request-URI of the Request-Line; duplicated because proxies are allowed to change
+	           the Request-Line in transit. HTTP digest auth only.
+	username - The username transmitted. This is set for both basic and digest auth all the time
 
 	For Example:
 	Authorization: Digest username="Alice", realm="atlanta.com",
@@ -1071,6 +1135,22 @@ class WwwAuthenticateHeader(AuthenticationHeader):
 	response messages. The field value consists of at least one challenge that indicates
 	the authentication scheme(s) and parameters applicable to the realm.
 
+	algorithm - A string indicating a pair of algorithms used to produce the digest and
+	            a checksum. If this is not present it is assumed to be "MD5". If the algorithm
+		    is not understood, the challenge should be ignored (and a different one used, if there is more than one).
+	domain    - list of URIs that define the protection space. If a URI is an absolute path,
+	            it is relative to the canonical root URL of the server being accessed.
+	nonce     - A server-specified data string which should be uniquely generated each time
+	            a 401 response is made. It is recommended that this string be base64 or hexadecimal data.
+	opaque    - A string of data, specified by the server, which should be returned by the client
+	            unchanged in the Authorization header of subsequent requests with URIs in the same
+		    protection space. It is recommended that this string be base64 or hexadecimal data.
+	qop       - A set of quality-of-privacy directives such as auth and auth-int.
+	realm     - A string to be displayed to users so they know which username and password to use.
+	            This string should contain at least the name of the host performing the authentication
+		    and might additionally indicate the collection of users who might have access.
+	type      - The type of the auth mechanism. HTTP currently specifies Basic and Digest.
+
 	For Example:
 	WWW-Authenticate: Digest realm="atlanta.com", domain="sip:boxesbybob.com",
 	qop="auth", nonce="f84f1cec41e6cbe5aea9c8e88d359", opaque="", stale=FALSE, algorithm=MD5 
@@ -1083,9 +1163,28 @@ class WwwAuthenticateHeader(AuthenticationHeader):
 
 ###### sip messsage parser ############################################################
 
-#!/usr/bin/python
-
 class SipParser(object):
+
+
+	@staticmethod
+	def parseListHeader(value):
+		"""Parse lists as described by RFC 2068 Section 2.
+
+		In particular, parse comma-separated lists where the elements of
+		the list may include quoted-strings. A quoted-string could
+		contain a comma. A non-quoted string could have quotes in the
+		middle. Quotes are removed automatically after parsing.
+
+		>>> parse_list_header('token, "quoted value"')
+		['token', 'quoted value']
+		"""
+		result = []
+		for item in _parse_list_header(value):
+			if item[:1] == item[-1:] == '"':
+				item = unquote_header_value(item[1:-1])
+			result.append(item)
+		return result
+
 	
 	def parseSIPMessage(self, buffer):
 
@@ -1433,28 +1532,27 @@ class SipMessage(object):
 
 
 class SipRequest(SipMessage):
-	"""Sip Request class"""
+	"""Sip Request"""
 
 	def __init__(self):
 		SipMessage.__init__(self)
-		self.__method = None 
-		self.__requestUri = None 
+		self._method = None 
+		self._requestUri = None 
 		
 	def getMethod(self):
-		return self.__method
+		return self._method
 
 	def setMethod(self, method):
-		self.__method = method
+		self._method = method
 
 	def getRequestUri(self):
-		return self.__requestUri
+		return self._requestUri
 
 	def setRequestUri(self, requestUri):
-		self.__requestUri = requestUri
-
+		self._requestUri = requestUri
 
 	def getFirstLine(self):
-		return self.__method + ' ' + str(self.__requestUri) + ' SIP/2.0' 
+		return self._method + ' ' + str(self._requestUri) + ' SIP/2.0' 
 
 	def checkHeaders(self):
 		"""Quick check if all required headers are present"""
@@ -1462,7 +1560,7 @@ class SipRequest(SipMessage):
 		#requiredHeaders = [SipFromHeader, SipToHeader, SipCSeqHeader, SipCallIdHeader, MaxForwardsHeader, SipViaHeader]
 		requiredHeaders = [SipFromHeader, SipToHeader, SipCSeqHeader, SipCallIdHeader, SipViaHeader]
         	# Contact (only for INVITE)
-		if self.__method == Sip.METHOD_INVITE:
+		if self._method == Sip.METHOD_INVITE:
 			requiredHeaders.append(ContactHeader)
 
 		for rh in requiredHeaders:
@@ -1475,28 +1573,51 @@ class SipRequest(SipMessage):
 				raise ESipMessageException('Missing required header: ' + rh.__name__)
 
 class SipResponse(SipMessage):
+	"""Sip Response"""
   
 	def __init__(self):
 		SipMessage.__init__(self)
-		self.__statusCode = None 
-		self.__reasonPhrase = None
+		self._statusCode = None 
+		self._reasonPhrase = None
 
 	def getStatusCode(self):
-		return self.__statusCode
+		return self._statusCode
 
 	def setStatusCode(self, statusCode):
-		self.__statusCode = statusCode 
+		self._statusCode = statusCode 
 
 	def getReasonPhrase(self):
-		return self.__reasonPhrase
+		return self._reasonPhrase
 
 	def setReasonPhrase(self, reasonPhrase):
-		self.__reasonPhrase = reasonPhrase 
+		self._reasonPhrase = reasonPhrase 
 
 	def getFirstLine(self):
-		return 'SIP/2.0 ' + str(self.__statusCode) + ' ' + str(self.__reasonPhrase)
+		return 'SIP/2.0 ' + str(self._statusCode) + ' ' + str(self._reasonPhrase)
+
+class MessageFactory(object):
+  
+	def createRequest(requestUri = None, method = None):
+		"""Creates a new Request message"""
+		result = SipRequest()
+		if requestUri is not None:
+			result.setRequestUri(requestUri)
+		if method is not None:
+			result.setMethod(method)
+		return result
+
+	def createResponse(self, statusCode, request):
+		"""Creates a new Response message of type specified by the statusCode paramater, based on a specific Request message."""
+		response = SipResponse()
+		response.setStatusCode(statusCode)
+		response.setReasonPhrase('OK')
+		for header in request.getHeaders():
+ 			if isinstance(header, (SipToHeader, SipFromHeader, SipCallIdHeader, SipCSeqHeader, SipContactHeader, SipViaHeader)):
+				response.addHeader(header)
+		return response
 
 
+##### unit test cases #########################################################################
 
 class UnitTestCase(unittest.TestCase):
 
@@ -1629,33 +1750,6 @@ class UnitTestCase(unittest.TestCase):
 		sipParser = SipParser()
 		sipParser.parseSIPMessage(msg) 
 
-
-class MessageFactory(object):
-  
-	def createRequest(requestUri = None, method = None):
-
-		result = SipRequest()
-
-		if requestUri is not None:
-			result.setRequestUri(requestUri)
-
-		if method is not None:
-			result.setMethod(method)
-
-		return result
-
-	def createResponse(self, statusCode, request):
-		"""Creates a new Response message of type specified by the statusCode paramater, based on a specific Request message."""
-		response = SipResponse()
-
-		response.setStatusCode(statusCode)
-		response.setReasonPhrase('OK')
-
-		for header in request.getHeaders():
- 			if isinstance(header, (SipToHeader, SipFromHeader, SipCallIdHeader, SipCSeqHeader, SipContactHeader, SipViaHeader)):
-				response.addHeader(header)
-
-		return response
 
 	
 def suite():
