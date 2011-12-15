@@ -1,3 +1,5 @@
+#!/usr/bin/python
+
 from sipmessage import *
 from sipstack import SipStack, SipListeningPoint, SipListener
 import sys
@@ -36,17 +38,13 @@ class SipClient(SipListener):
 		try:
 			self.s.start()
 			udpListeningPoint = SipListeningPoint(self.s, SERVER_IP, SERVER_PORT, Sip.TRANSPORT_UDP);
-			tcpListeningPoint = SipListeningPoint(self.s, SERVER_IP, SERVER_PORT, Sip.TRANSPORT_TCP);
 			self.s.addListeningPoint(udpListeningPoint)
-			self.s.addListeningPoint(tcpListeningPoint)
 			self.s.addSipListener(self)
 
-			# send several messages
-			for i in xrange(1000):
-				print "Sending message no: %d" % i
-				self.s.sendRequest(m)
+			tran = self.s.getNewClientTransaction(m)
+			tran.sendRequest()
 			print "Waiting 1s to process all pending messages"
-			time.sleep(2)
+			time.sleep(1)
 		finally:
 			self.s.stop()
 		

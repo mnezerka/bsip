@@ -663,7 +663,7 @@ class AuthenticationHeader(Header, dict):
 	
 	def getAlgorithm(self):
 		"""Returns the Algorithm value of this AuthenticationHeader."""
-		return self.getParameter(AuthenticationHeader.PARAM_ALGORITHM)
+		return self[Header.PARAM_ALGORITHM] if Header.PARAM_ALGORITHM in self else None
 
 	def setAlgorithm(self, algorithm):
 		"""Sets the Algorithm of the AuthenticationHeader to the new algorithm parameter value."""
@@ -687,7 +687,7 @@ class AuthenticationHeader(Header, dict):
 
 	def getNonce(self):
 		"""Returns the Nonce value of this AuthenticationHeader."""
-		return self.getParameter(AuthenticationHeader.PARAM_NONCE)
+		return self[Header.PARAM_NONCE] if Header.PARAM_NONCE in self else None
 
 	def setNonce(self, nonce):
 		"""Sets the Nonce of the AuthenticationHeader to the nonce parameter value."""
@@ -703,7 +703,7 @@ class AuthenticationHeader(Header, dict):
 
 	def getOpaque(self):
 		"""Returns the Opaque value of this AuthenticationHeader."""
-		return self.getParameter(AuthenticationHeader.PARAM_OPAQUE)
+		return self[Header.PARAM_OPAQUE] if Header.PARAM_OPAQUE in self else None
 
 	def setOpaque(self, opaque):
 		"""Sets the Opaque value of the AuthenticationHeader to the new opaque parameter value."""
@@ -711,7 +711,7 @@ class AuthenticationHeader(Header, dict):
 
 	def getQop(self):
 		"""Returns the Qop value of this AuthenticationHeader."""
-		return self.getParameter(AuthenticationHeader.PARAM_QOP)
+		return self[Header.PARAM_QOP] if Header.PARAM_QOP in self else None
 
 	def setQop(self, qop):
 		"""Sets the MessageQop value of the AuthenticationHeader to the new qop parameter value."""
@@ -719,7 +719,7 @@ class AuthenticationHeader(Header, dict):
 
 	def getRealm(self):
 		"""Returns the Realm value of this AuthenticationHeader."""
-		return self.getParameter(AuthenticationHeader.PARAM_REALM)
+		return self[Header.PARAM_REALM] if Header.PARAM_REALM in self else None
 
 	def setRealm(self, realm):
 		"""Sets the Realm of the AuthenticationHeader to the realm parameter value."""
@@ -928,42 +928,41 @@ class ContentTypeHeader(Header, MediaType):
 		result = self.getName() + ': ' + MediaType.__str__(self)
 		return result
 
-
 class SipCSeqHeader(Header):
 	
 	def __init__(self, body = None):
 		Header.__init__(self, 'CSeq' , body)
 
-		self.__method = None
-		self.__seqNumber = None
+		self._method = None
+		self._seqNumber = None
 
 		if body is not None:
 			(num, sep, method) = body.partition(' ')
 			if len(sep) > 0:
-				self.__seqNumber = num.strip()
-				self.__method = method.strip()
+				self._seqNumber = int(num.strip())
+				self._method = method.strip()
 			else:
 				raise ESipMessageException('Invalid format for CSeq header')
 
 	def getMethod(self):
 		"""Gets the method of CSeqHeader"""
-		return self.__method
+		return self._method
 
 	def setMethod(self, method):
 		"""Sets the method of CSeqHeader"""
-		self.__method = method
+		self._method = method
 			
 	def getSeqNumber(self):
 		"""Gets the sequence number of this CSeqHeader."""
-		return self.__seqNumber
+		return self._seqNumber
 
 	def setSeqNumber(self, seqNumber):
 		"""Sets the sequence number value of the CSeqHeader."""
-		self.__seqNumber = seqNumber
+		self._seqNumber = seqNumber
 
 	def __str__(self):
 		result = self.getName() + ': '
-		result += str(self.__seqNumber) + ' ' + self.__method
+		result += str(self._seqNumber) + ' ' + self._method
 		return result
 
 
@@ -1040,7 +1039,7 @@ class SipViaHeader(Header, dict):
 
 	def setBranch(self, branch):
 		"""Sets the branch parameter of the SipViaHeader to the newly supplied branch value."""
-		self.setParameter(SipViaHeader.PARAM_BRANCH, branch)
+		self[Header.PARAM_BRANCH] = branch
 
 	def getHost(self):
 		"""Returns the host part of this SipViaHeader."""
@@ -1092,7 +1091,7 @@ class SipViaHeader(Header, dict):
 
 	def getTransport(self):
 		"""Returns the value of the transport parameter."""
-		return self.getParameter(SipViaHeader.PARAM_TRANSPORT)
+		return self[Header.PARAM_TRANSPORT] if Header.PARAM_TRANSPORT in self else None
 
 	def setTransport(self, transport):
 		"""Sets the value of the transport."""
@@ -1159,7 +1158,9 @@ class WwwAuthenticateHeader(AuthenticationHeader):
 	def __init__(self, body = None):
 		AuthenticationHeader.__init__(self, 'WWW-Authenticate', body)
 
-
+class ProxyAuthenticateHeader(WwwAuthenticateHeader):
+	"""This class represents the Proxy-Authenticate response-header."""
+	pass	
 
 ###### sip messsage parser ############################################################
 
