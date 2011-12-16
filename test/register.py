@@ -2,6 +2,7 @@
 
 import sys
 import time
+import copy
 from sipmessage import *
 from sipstack import SipStack, SipListeningPoint, SipListener, Authenticator
 from accountmanager import *
@@ -10,14 +11,19 @@ SERVER_IP = '127.0.0.1'
 SERVER_PORT = 60001
 CLIENT_IP = SERVER_IP
 CLIENT_PORT = SERVER_PORT + 1
+
+CLIENT_IP = "64.17.181.198"
+CLEINT_PORT = 60001
+SERVER_IP = "22.66.32.72"
+SERVER_PORT = 5060
 OUTBOUND_PROXY = SERVER_IP + ':' + str(SERVER_PORT)
 
 user1 = User()
 user1.setUserName('ITSY000001')
 user1.setDisplayName('ITSY000001')
-user1.setSipDomain('brn38.iit.ims')
-user1.setAuthUserName('ITSY000001.priv@brn38.iit.ims')
-user1.setAuthPassword('33800000001')
+user1.setSipDomain('brn66.iit.ims')
+user1.setAuthUserName('ITSY000001.priv@brn66.iit.ims')
+user1.setAuthPassword('36600000001')
 
 class SipClient(SipListener):
 
@@ -28,25 +34,54 @@ class SipClient(SipListener):
 		self.headerFactory = HeaderFactory()
 
 	def run(self):
+		requestUri = SipUri('sip:%s' % user1.getSipDomain())
+		user1Uri = SipUri('sip:%s@%s' % (user1.getUserName(), user1.getSipDomain()))
+		user1SipAddress = SipAddress()
+		user1SipAddress.setUri(user1Uri)
+		user1SipAddress.setDisplayName(user1.getDisplayName())
+
 		self.r = SipRequest()
-		self.r.setMethod(Sip.METHOD_MESSAGE)
-		requestUri = SipUri()
-		requestUri.setScheme(Sip.URI_PREFIX_SIP)
-		requestUri.setUser('alice')
-		requestUri.setHost('blue.com')
+		self.r.setMethod(Sip.METHOD_REGISTER)
 		self.r.setRequestUri(requestUri)
-		self.r.addHeader(SipFromHeader('sip:alice@blue.com'))
-		self.r.addHeader(SipToHeader('sip:bob@blue.com'))
-		self.r.addHeader(SipCallIdHeader('callid'))
-		self.r.addHeader(SipCSeqHeader('34 REGISTER'))
-		self.r.addHeader(SipViaHeader('SIP/2.0/UDP some.host;branch=z9hG4bKsomebranch;lskpmc=P01'))
-		#m.setContent("This is the body of the messsage")
-		extensionHeader = Header('My-Header', 'my header value');
-		self.r.addHeader(extensionHeader);
+
+		fromHeader = SipFromHeader()
+		fromHeader.setAddress(user1SipAddress)
+		fromHeader.setTag(SipUtils.generateTag())
+		self.r.addHeader(fromHeader)
+		toHeader = SipToHeader()
+		toHeader.setAddress(user1SipAddress)
+		self.r.addHeader(toHeader)
+
+		self.r.addHeader(SipCallIdHeader(SipUtils.generateCallIdentifier(CLIENT_IP)))
+
+		self.r.addHeader(SipCSeqHeader('1 REGISTER'))
+		viaHeader = SipViaHeader('SIP/2.0/UDP some.host')
+		viaHeader.setBranch(SipUtils.generateBranchId());
+		self.r.addHeader(viaHeader)
+		self.r.addHeader(MaxForwardsHeader('70'))
+		self.r.addHeader(ExpiresHeader('3600'))
+
+		contactUri = SipUri()
+		contactUri.setScheme(Uri.SCHEME_SIP)
+		contactUri.setHost(CLIENT_IP);
+		contactUri.setPort(CLIENT_PORT);
+		contactHeader = SipContactHeader()
+		contactHeader.setAddress(contactUri)
+		self.r.addHeader(contactHeader);
+
+		# create authorization header
+		authorizationHeader = AuthorizationHeader()
+		authorizationHeader.setScheme('Digest')
+		authorizationHeader.setUserName(user1.getAuthUserName())
+		authorizationHeader.setRealm(user1.getSipDomain())
+		authorizationHeader.setUri(str(requestUri))
+		authorizationHeader.setNonce('')
+		authorizationHeader.setResponse('')
+		self.r.addHeader(authorizationHeader)
 
 		try:
 			self.s.start()
-			udpListeningPoint = SipListeningPoint(self.s, SERVER_IP, SERVER_PORT, Sip.TRANSPORT_UDP);
+			udpListeningPoint = SipListeningPoint(self.s, CLIENT_IP, CLIENT_PORT, Sip.TRANSPORT_UDP);
 			#tcpListeningPoint = SipListeningPoint(self.s, SERVER_IP, SERVER_PORT, Sip.TRANSPORT_TCP);
 			self.s.addListeningPoint(udpListeningPoint)
 			#self.s.addListeningPoint(tcpListeningPoint)
@@ -56,8 +91,7 @@ class SipClient(SipListener):
 			for i in xrange(1):
 				print "Sending message no: %d" % i
 				self.s.sendRequest(self.r)
-			print "Waiting 1s to process all pending messages"
-			time.sleep(1)
+			time.sleep(3)
 		finally:
 			self.s.stop()
 		
@@ -121,8 +155,6 @@ class SipClient(SipListener):
 			if content is None:
 				content = ''
 
-			#accountManager = AccountManager()
-
 			authenticator = Authenticator(self.headerFactory)
 
 			authorization = authenticator.getAuthorization(
@@ -132,13 +164,22 @@ class SipClient(SipListener):
 				authHeader,
 				user1)
 
-			#print 'Created authorization header: %s' % str(authorization)
-			
 			self.r.addHeader(authorization)
 
 			self.s.sendRequest(self.r)
 
-		#print str(responseEvent.getResponse())
+		elif response.getStatusCode() == 200:
+
+			print "finished"
+
+			# Increment cseq
+			#cSeq = self.r.getHeaderByType(SipCSeqHeader)
+                	#cSeq.setSeqNumber(cSeq.getSeqNumber() + 1l)
+
+			#expiresHeader = self.r.getHeaderByType(ExpiresHeader)
+			#expiresHeader.setExpires(0)			
+			#self.s.sendRequest(self.r)
+
 
 ### main ##############################
 

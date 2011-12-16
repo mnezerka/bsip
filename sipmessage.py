@@ -376,7 +376,7 @@ class SipUri(Uri):
 
 	def __str__(self):
 		if self.getScheme() is None or  self._host is None:
-			raise ESipMessageException('uri attributes not complete')
+			raise ESipMessageException('uri attributes (scheme, host) not complete')
 
 		result = self.getScheme() + ':'
 	
@@ -404,10 +404,14 @@ class SipUri(Uri):
 
 class SipAddress(object):
 	"""This class represents a user's display name and URI address. The display name of
-	 an address is optional but if included can be displayed to an end-user. The address
-	 URI (most likely a SipURI) is the user's address. For example a 'To' address of
-	 To: Bob sip:duke@jcp.org would have a display name attribute of Bob and an address
-	 of sip:duke@jcp.org. 
+	an address is optional but if included can be displayed to an end-user. The address
+	URI (most likely a SipURI) is the user's address. For example a 'To' address of
+	To: Bob sip:duke@jcp.org would have a display name attribute of Bob and an address
+	of sip:duke@jcp.org. 
+
+	Examples:
+        sip:bob@beloxi.com
+        Bob <sip:bob@beloxi.com>
 	"""
 
 	def __init__(self, str = None):
@@ -926,6 +930,95 @@ class ContentTypeHeader(Header, MediaType):
 
 	def __str__(self):
 		result = self.getName() + ': ' + MediaType.__str__(self)
+		return result
+
+class ExpiresHeader(Header):
+	"""The Expires header field gives the relative time after which the message (or content)
+	expires.
+
+i	The precise meaning of this is method dependent. The expiration time in an INVITE
+	does not affect the duration of the actual session that may result from the invitation.
+	Session description protocols may offer the ability to express time limits on the session
+	duration, however. The value of this field is an integral number of seconds (in decimal)
+	between 0 and (2**32)-1, measured from the receipt of the request. Malformed values
+	SHOULD be treated as equivalent to 3600.
+
+	This interface represents the Expires entity-header. The ExpiresHeader is optional in
+	both REGISTER and INVITE Requests.
+
+	 * REGISTER - When a client sends a REGISTER request, it MAY suggest an expiration interval
+	that indicates how long the client would like the registration to be valid. There are two ways
+	in which a client can suggest an expiration interval for a binding: through an Expires header
+	field or an "expires" Contact header parameter. The latter allows expiration intervals to be
+	suggested on a per-binding basis when more than one binding is given in a single REGISTER request,
+	whereas the former suggests an expiration interval for all Contact header field values that do not
+	contain the "expires" parameter.
+
+	 * INVITE - The UAC MAY add an Expires header field to limit the validity of the invitation. If the
+	time indicated in the Expires header field is reached and no final answer for the INVITE has
+	been received, the UAC core SHOULD generate a CANCEL request for the INVITE. 
+
+	Example:
+	Expires: 5
+"""
+	
+	def __init__(self, body = None):
+		Header.__init__(self, 'Expires' , body)
+
+		self.__expires = None
+
+		if body is not None and body.isdigit():
+			self.__expires = int(body)
+
+	def getExpires(self):
+		"""Gets the expires value of the ExpiresHeader."""
+		return self.__expires
+
+	def setExpires(self, expires):
+		"""Sets the relative expires value of the ExpiresHeader in units of seconds."""
+		self.__expires = expires
+
+	def __str__(self):
+		result = self.getName() + ': ' + str(self.__expires)
+		return result
+
+class MaxForwardsHeader(Header):
+	"""The Max-Forwards header field must be used with any SIP method to limit the number
+	 of proxies or gateways that can forward the request to the next downstream server.
+	  This can also be useful when the client is attempting to trace a request chain that
+	   appears to be failing or looping in mid-chain.
+
+	The Max-Forwards value is an integer in the range 0-255 indicating the remaining number
+	 of times this request message is allowed to be forwarded. This count is decremented by
+	  each server that forwards the request. The recommended initial value is 70.
+
+	This header field should be inserted by elements that can not otherwise guarantee loop
+	 detection. For example, a B2BUA should insert a Max-Forwards header field. 
+	"""
+	
+	def __init__(self, body = None):
+		Header.__init__(self, 'Max-Forwards' , body)
+
+		self._maxForwards = None
+
+		if body is not None and body.isdigit():
+			self._maxForwards = int(body)
+
+	def decrementMaxForwards(self):
+		"""This convenience function decrements the number of max-forwards by one."""
+		if self._maxForwards is not None:
+			self._maxForwards -= 1
+
+	def getMaxForwards(self):
+		"""Gets the maximum number of forwards value of this MaxForwardsHeader."""
+		return self._maxForwards
+
+	def setMaxForwards(self, maxForwards):
+		"""Sets the max-forwards argument of this MaxForwardsHeader to the supplied maxForwards value."""
+		self._maxForwards = maxForwards 
+
+	def __str__(self):
+		result = self.getName() + ': ' + str(self._maxForwards)
 		return result
 
 class SipCSeqHeader(Header):

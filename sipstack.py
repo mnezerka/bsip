@@ -11,6 +11,7 @@ import time
 import hashlib
 
 from sipmessage import *
+#from accountmanager import *
 
 class ESipStackException(Exception):
 	pass
@@ -23,59 +24,6 @@ class ESipStackInvalidArgument(ESipStackException):
 
 class ESipStackNoListeningPoint(ESipStackException):
 	pass
-
-class User(object):
-
-	def __init__(self):
-		self._userName = None
-		self._displayName = None
-		self._sipDomain = None
-		self._authUserName = None
-		self._authPassword = None
-
-	def getUserName(self):
-		"""Returns the name of the user that these credentials relate to."""
-  		return self._userName 
-
-	def setUserName(self, userName):
-		self._userName = userName
-
-	def getDisplayName(self):
-		"""Returns the name of the user that these credentials relate to."""
-  		return self._displayName 
-
-	def setDisplayName(self, name):
-		self._displayName = name 
-
-	def getAuthUserName(self):
-		"""Returns the name of the user that these credentials relate to."""
-  		return self._authUserName 
-
-	def setAuthUserName(self, name):
-		self._authUserName = name 
-
-
-	def getAuthPassword(self):
-		"""Returns a password associated with this set of credentials."""
-  		return self._authPassword
-
-	def setAuthPassword(self, password):
-		self._authPassword = password
-   
-	def getSipDomain(self):
-		"""Returns the SIP Domain for this username password combination."""
-  		return self._sipDomain
-
-	def setSipDomain(self, sipDomain):
-		self._sipDomain = sipDomain
-
-	def getHashUserDomainPassword(self):
-		"""Get the MD5(userName:sipdomain:password)"""
-		p = self._authUserName + ':' + self._sipDomain + ':' + self._authPassword
-		m = hashlib.md5()
-		m.update(p)
-		return m.hexdigest()
-
 
 class SipRequestEvent(object):
 	"""This class represents an Request event that is passed from a SipStack to its SipListener(s).
@@ -1294,119 +1242,6 @@ class Authenticator(object):
 		self.__cachedCredentials = []
 		self.__headerFactory = headerFactory
 
-
-	def handleChallenge(self, challengeResponse, challengedTransaction, transactionCreator, cacheTime = 0):
-		"""Uses security authority to determinie a set of valid user credentials for
-		the specified Response (Challenge) and appends it to the challenged request so
-		that it could be retransmitted.
-
-		Parameters:
-		 * challengeResponse: the 401/407 challenge response
-		 * challengedTransaction: the transaction established by the challenged request
-		 * transactionCreator: the SipProvider that we should use to create the new transaction.
-		 * cacheTime The amount of time (seconds) for which the authentication helper will keep
-		   a reference to the generated credentials in a cache. If you specify -1, then the
-		   authentication credentials are cached until you remove them from the cache. If you
-		   choose this option, make sure you remove the cached headers or you will have a memory leak.
-
-		Returns: a transaction containing a re-originated request with the necessary authorization header.
-		"""
-
-		logger = logging.getLogger(self.LOGGER_NAME)
-		logger.debug('handleChallenge() Enter')
-		
-		challengedRequest = challengedTransaction.getOriginalRequest()
-
-		reoriginatedRequest = None
-
-		# If the challenged request is part of a Dialog and the Dialog is confirmed the re-originated
-		# request should be generated as an in-Dialog request. 
-		dialog = challengedTransaction.getDialog()
-		if not challengedRequest.getToTag() is None or dialog is None or dialog.getState() != Sip.DIALOG_STATE_CONFIRMED:
-			reoriginatedRequest = copy.deepcopy(challengedRequest)
-		else:
-			# Re-originate the request by consulting the dialog. In particular 
-			# the route set could change between the original request and the  
-			# in-dialog challenge. 
-			reoriginatedRequest = challengedTransaction.getDialog().createRequest(challengedRequest.getMethod()); 
-			for header in challengedRequest.getHeaders():
-				# if new request doesn't have current header type then all headers of this name
-				srcHeaders = challengedRequest.getHeadersByName(header.getName())	
-				reoriginatedRequest.addHeaders(srcHeaders)
-
-		# remove the branch id so that we could use the request in a new transaction
-		topMostVia = reoriginatedRequest.getTopmostViaHeader()
-		if not topMostVia is None:
-			tomMostVia.setBranch(None)  
-
-		if challengeResponse is None or reoriginatedRequest is None:
-			raise EInvalidArgument('A null argument was passed to handle challenge.');
-            
-		authHeaders = None;
-
-		if challengeResponse.getStatusCode() == Sip.RESPONSE_UNAUTHORIZED:
-			authHeaders = challengeResponse.getHeadersByType(WwwAuthenticateHeader)
-		elif challengeResponse.getStatusCode() == Sip.RESPONSE_PROXY_AUTHENTICATION_REQUIRED:
-			authHeaders = challengeResponse.getHeadersByType(ProxyAuthenticateHeader)
-		else:
-                	raise ESipException('Unexpected status code')
-
-		if authHeaders is None:
-			raise ESipException('Could not find WWWAuthenticate or ProxyAuthenticate headers');
-
-		# Remove all authorization headers from the request (we'll re-add them from cache)
-		reoriginatedRequest.removeHeadersByType(AuthorizationHeader)
-		reoriginatedRequest.removeHeadersByType(ProxyAuthorizationHeader)
-
-		# rfc 3261 says that the cseq header should be augmented for the new
-		# request. do it here so that the new dialog (created together with
-		# the new client transaction) takes it into account.
-		# Bug report - Fredrik Wickstrom
-		cSeq = reoriginatedRequest.getHeaderByType(SipCSeqHeader)
-                cSeq.setSeqNumber(cSeq.getSeqNumber() + 1l)
-
-
-		# Resolve this to the next hop based on the previous lookup. If we are not using
-		# lose routing (RFC2543) then just attach hop as a maddr param.
-		#mn if len(challengedRequest.getRouteHeaders()) == 0:
-		#mn 	hop = challengedTransaction.getNextHop()
-                #mn sipUri = reoriginatedRequest.getRequestUri()
-                #mn sipUri.setMAddrParam(hop.getHost())
-                #mn if hop.getPort() != -1:
-		#mn 	sipUri.setPort(hop.getPort())
-            
-		retryTran = transactionCreator.getNewClientTransaction(reoriginatedRequest);
-
-		authHeader = None;
-		requestUri = challengedRequest.getRequestURI();
-
-		for authHeader in authHeaders:
-			realm = authHeader.getRealm()
-			authorization = None;
-
-			userCreds = self.__accountManager.getCredentials(challengedTransaction, realm)
-
-			if userCreds is None:
-				raise ESipException('Cannot find user creds for the given user name and realm')
-			
-			sipDomain = userCreds.getSipDomain()
-
-			# we haven't yet authenticated this realm since we were started.
-			content = reoriginatedRequest.getContent()
-			if content is None:
-				content = ''
-			authorization = self.getAuthorization(
-				reoriginatedRequest.getMethod(),
-				str(reoriginatedRequest.getRequestUri()),
-                                content,
-				authHeader,
-				userCreds)
-                
-
-			logger.debug('Created authorization header: %s' + str(authorization))
-
-		logger.debug('handleChallenge() Leave')
-
 	def getAuthorization(self, method, uri, requestBody, authHeader, userCredentials):
 		"""Generates an authorization header in response to WwwAuthenticationHeader"""
 
@@ -1453,7 +1288,7 @@ class Authenticator(object):
 			authorization = self.__headerFactory.createAuthorizationHeader(authHeader.getScheme())
 
 		authorization.setScheme(authHeader.getScheme())
-		authorization.setUserName(userCredentials.getUserName())
+		authorization.setUserName(userCredentials.getAuthUserName())
 		authorization.setRealm(authHeader.getRealm())
 		authorization.setNonce(authHeader.getNonce())
 		authorization.setUri(uri)
