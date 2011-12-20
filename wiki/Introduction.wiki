@@ -1,11 +1,13 @@
 #summary Basic overview of the project
 
+= References =
+
+SIP - [http://www.ietf.org/rfc/rfc3261.txt RFC3261]
+
 = ToDo =
 
 Following points are waiting for implementation
  * predefined route set and outbound proxy used as singe route in route set
- * digest authentication
- * both client and server transactions
  * dialogs support
  * check: If more than one Via header field value is present in a response, the UAC SHOULD discard the message.
  * processing of 3xx responses
