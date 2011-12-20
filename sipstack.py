@@ -231,39 +231,50 @@ class SipListeningPoint(IpProcessor):
 		# prepare response event
 		if isinstance(msg, sipmessage.SipRequest):
 
-			# identify (match) dialog
-			dialog = None
-
 			# check for the required headers.
 			topMostVia = msg.getTopmostViaHeader()
 			msg.checkHeaders()
 
 			# server transaction
-			serverTransaction = None
-			if createTransactions:
-				# create server transaction
-				serverTransaction = self.__sipStack.newSipServerRequest(msg)
+			serverTransaction = self._sipStack.getServerTransactionForRequest(msg)
 
-				print serverTransaction
+			# TODO: if serverTransaction not None then it is retransmission
+				
+			if createTransactions and serverTransaction is None:
+				serverTransaction = self._sipStack.createServerTransaction(msg)
+
+				#tranId = msg.getTransactionId()
+				#logger.debug('onData(), looking for existing server transaction: %s, %s ', tranId, msg.getFirstLine())
+
+			#  modify transaction state according to state machine 
+			if not serverTransaction is None:
+				if msg.getMethod() in [SipRequest.METHOD_INVITE, SipRequest.METHOD_ACK]:
+					serverTransaction.setState(SipTransaction.TRANSACTION_STATE_PROCEEDING)
+				else: 
+					serverTransaction.setState(SipTransaction.TRANSACTION_STATE_TRYING)
+
+			# identify (match) dialog
+			dialog = None
 
 			# create new ResponseEvent
 			event = SipRequestEvent(self, msg, serverTransaction, dialog)
 
 		elif isinstance(msg, sipmessage.SipResponse):
 
-
 			topVia = msg.getTopmostViaHeader()
 
 			# identify (match) client transaction
-			clientTransaction = None
-			if createTransactions:
-				clientTransaction = self.__sipProvider.getSipStack().getClientTransactionForResponse(msg)
+			clientTransaction = self._sipStack.getClientTransactionForResponse(msg)
 
-				if not clientTransaction is None:
-					if msg.getStatusCode() >= 200 and msg.getStatusCode() <= 699:
-						clientTransaction.setState(Sip.TRANSACTION_STATE_COMPLETED)
-					elif msg.getStatusCode() >= 100 and msg.getStatusCode() <= 199:
-						clientTransaction.setState(Sip.TRANSACTION_STATE_PROCEEDING)
+			if createTransactions and clientTransaction is None:
+				clientTransaction = self._sipStack.createClientTransaction(msg)
+
+			#  modify transaction state according to state machine and response code
+			if not clientTransaction is None:
+				if msg.getStatusCode() >= 200 and msg.getStatusCode() <= 699:
+					clientTransaction.setState(SipTransaction.TRANSACTION_STATE_COMPLETED)
+				elif msg.getStatusCode() >= 100 and msg.getStatusCode() <= 199:
+					clientTransaction.setState(SipTransaction.TRANSACTION_STATE_PROCEEDING)
 
 			# identify (match) dialog
 			dialog = None
@@ -681,7 +692,7 @@ class SipStack(dict):
 
 		self._state = self.STATE_STOPPED
 		self._listeningPoints = {}
-		self._clientTransactions = [] 
+		self._clientTransactions = {} 
 		self._serverTransactions = {} 
 		self._sipListeners = []
 
@@ -703,7 +714,10 @@ class SipStack(dict):
 
 	def getSipListeners(self):
 		return self._sipListeners
-	
+
+	def getServerTransactions(self):
+		return self._serverTransactions	
+
 	def getIpDispatcher(self):
 		return self._ipDispatcher
 
@@ -874,7 +888,7 @@ class SipStack(dict):
 		logger.debug('  msg length: %d', len(message))
 		logger.debug('  transport: %s', transport)
 
-		logger.debug('sending message: %s', message)
+		logger.debug('sending message:\n------\n%s\n-------', message)
 
 		ipDispatcher = self.getIpDispatcher()
 		ipDispatcher.sendSync(
@@ -942,27 +956,47 @@ class SipStack(dict):
 		
 		logger.debug('sendResponse() Leave')
 
-	def getNewClientTransaction(self, request):
+	def getServerTransactionForRequest(self, request):
+		logger = logging.getLogger(self.LOGGER_NAME)
+		tranId = request.getTransactionId()
+		logger.debug('getServerTransactionForRequest() looking for server transaction identified by %s' % tranId)
+		return self._serverTransactions[tranId] if tranId in self._serverTransactions else None
+
+
+	def getClientTransactionForResponse(self, response):
+		"""Find client transaction to be assigned to response
+		
+		When a response is received, it has to be determine which
+		client transaction will handle the response,
+			
+		A response matches a client transaction under two conditions:
+
+		1.  response.topvia.branch == originalrequest.topvia.branch
+		2.  response.cseq_header == originalrequest.method
+
+		This is already covered by method getTransactionId() which uses cseq
+		header for computation.
+
+		For more details see sections 17.1.1 and 17.1.2 of sip rfc.
+		"""
 
 		logger = logging.getLogger(self.LOGGER_NAME)
-		
-		logger.debug('getNewClientTransaction() Enter')
+		tranId = response.getTransactionId()
+		logger.debug('getClientTransactionForResponse() looking for client transaction identified by %s' % tranId)
+		return self._clientTransactions[tranId] if tranId in self._clientTransactions else None
+
+	def createClientTransaction(self, request):
+
+		logger = logging.getLogger(self.LOGGER_NAME)
+		logger.debug('createClientTransaction() Enter')
 
 		# check input parameters
 		if request is None:
-			raise EInvalidArgument('No Request')
+			raise ESipStackInvalidArgument('No Request')
 
 		#if not self.__sipStack.isRunning():
 		#	raise EInvalidState('SipStack is not in running state')
 
-		# try to find existing transacation for request
-		#if request.getTransaction() != None:
-		#	raise EInvalidState('Transaction already assigned to request')
-		# TODO
-
-		logger.debug('Could not find existing transaction for ' + request.getFirstLine() + ', creating a new one');
-
-		ct = SipClientTransaction(self, request)
 
 		# Set the brannch id before you ask for a tx.
 		# If the user has set his own branch Id and the
@@ -975,8 +1009,21 @@ class SipStack(dict):
 			branch = topmostViaHeader.getBranch();
 			if branch is None or not branch.startswith(Sip.BRANCH_MAGIC_COOKIE):
 				branch = SipUtils.generateBranchId()
+                		topmostViaHeader.setBranch(branch);
+
 		if branch is None:
 			branch = SipUtils.generateBranchId()
+
+		# get unique transaction identification
+		tranId = request.getTransactionId()
+
+		# try to find existing transacation for request
+		if tranId in self._clientTransactions:
+			raise ESipStackException('Transaction already assigned to request')
+
+		logger.debug('Could not find existing transaction for ' + request.getFirstLine() + ', creating a new one');
+
+		ct = SipClientTransaction(self, request)
 		ct.setBranch(branch);
 
 		# if the stack supports dialogs then
@@ -996,16 +1043,76 @@ class SipStack(dict):
 		# the provider is the event listener for all transactions.
 		#ct.addEventListener(self)
 
-		self._clientTransactions.append(ct)
-
-		logger.debug('getNewClientTransaction() Leave')
+		logger.debug('createClientTransaction() created new client transaction identified by %s' % tranId)
+		self._clientTransactions[request.getTransactionId()] = ct
+		logger.debug('createClientTransaction() Leave')
 
 		return ct 
+
+	def createServerTransaction(self, request):
+
+		logger = logging.getLogger(self.LOGGER_NAME)
+		logger.debug('createServerTransaction() Enter')
+
+		result = None
+
+		# check input parameters
+		if request is None:
+			raise ESipStackInvalidArgument('Missing request')
+
+		# get unique transaction identification
+		tranId = request.getTransactionId()
+
+		# try to find existing transacation for request
+		if tranId in self._serverTransactions:
+			raise ESipStackException('Transaction already assigned to request')
+
+		result = SipServerTransaction(self, request)
+		self._serverTransactions[tranId] = result 
+		logger.debug('onData(), created new server transaction: %s, %s ', tranId, request.getFirstLine())
+		logger.debug('createServerTransaction() Leave')
+
+		return result
+	
+	def getTransactionForMessage(self, msg):
+		logger = logging.getLogger(self.LOGGER_NAME)
+		logger.debug('getTransactionForMessage() Enter')
+		
+		result = None
+
+		via = msg.getTopmostViaHeader()
+
+		if not via is None:
+			if not via.getBranch() is None:
+				key = msg.getTransactionId()
+				if key in self._serverTransactions:
+					result = self._serverTransactions[key]
+				elif key in self._clientTransactions: 
+					result = self._clientTransactions[key]
+                        	
+		logger.debug('getTransactionForMessage() returning: ' + str(result))
+		logger.debug('getTransactionForMessage() Leave')
+		return result 
 
 ####### sip transactions ###############################################
 
 class SipTransaction(object):
-	"""Transactions are a fundamental component of SIP. A transaction is a request
+	"""Transactions are a fundamental component of SIP. Specifically,
+	a SIP transaction consists of a single request and any responses to
+	that request, which include zero or more provisional responses and
+	one or more final responses.  In the case of a transaction where the
+	request was an INVITE (known as an INVITE transaction), the
+	transaction also includes the ACK only if the final response was not
+	a 2xx response.  If the response was a 2xx, the ACK is not considered
+	part of the transaction.
+
+	Transactions have a client side and a server side. The client side
+	is known as a client transaction and the server side as a server
+	transaction. The client transaction sends the request, and the
+	server transaction sends the response.
+	
+	
+	 A transaction is a request
 	sent by a client transaction to a server transaction, along with all responses
 	to that request sent from the server transaction back to the client transactions.
 	User agents contain a transaction layer, as do stateful proxies. Stateless proxies
@@ -1073,9 +1180,7 @@ class SipTransaction(object):
 	#   the application is passed a request other than INVITE or ACK. 
 	TRANSACTION_STATE_TRYING = 'trying' 
 
-
-
-	LOGGER_NAME = 'Transaction'
+	LOGGER_NAME = 'SipTransaction'
 	
 	def __init__(self, sipStack, originalRequest):
 		self._applicationData = None
@@ -1102,7 +1207,6 @@ class SipTransaction(object):
 		"""Sets a unique branch identifer that identifies this transaction."""
 		self._branch = branch
 
-
 	def getDialog(self):
 		"""Gets the dialog object of this transaction object."""
 		return self._dialog
@@ -1124,10 +1228,6 @@ class SipTransaction(object):
 		"""Sets the value of the retransmit timer to the newly supplied timer value."""
 		raise ENotImplemented()
 
-	def getSipProvider(self):
-		#return this.getMessageProcessor().getListeningPoint().getProvider();
-		raise ENotImplemented()
-
 	def getState(self):
 		"""Returns the current state of the transaction."""
 		return self._state
@@ -1135,10 +1235,9 @@ class SipTransaction(object):
 	def setState(self, state):
 		"""Sets new state of the transaction"""
 
-		logger = logging.getLogger(__name__)
+		logger = logging.getLogger(self.LOGGER_NAME)
 		logger.debug('setState(), %s => %s', self._state, state)
 		self._state = state
-
 
 	def terminate(self):
 		"""Terminate this transaction and immediately release all stack resources associated with it."""
@@ -1147,7 +1246,7 @@ class SipTransaction(object):
 class SipClientTransaction(SipTransaction):
 	""" Client transaction"""
 
-	LOGGER_NAME = 'ClientTransaction'
+	LOGGER_NAME = 'SipClientTransaction'
 
 	def __init__(self, sipStack, request):
 		SipTransaction.__init__(self, sipStack, request)
@@ -1163,25 +1262,21 @@ class SipClientTransaction(SipTransaction):
 	def sendRequest(self):
 		"""Sends the Request which created this ClientTransaction.
 
-		Sends the Request which created this ClientTransaction. When an application wishes to send a Request message,
-		it creates a Request and then creates a new ClientTransaction from getNewClientTransaction. Calling this method
-		on the ClientTransaction sends the Request onto the network. The Request message gets sent via the ListeningPoint
-		information of the SipProvider that is associated to this ClientTransaction.
+		When an application wishes to send a Request message,
+		it creates a Request and then creates a new ClientTransaction
+		by call to createClientTransaction. Calling this method
+		on the ClientTransaction sends the Request onto the network. 
 
 		This method assumes that the Request is sent out of Dialog. It uses the Router to determine the next hop.
 		If the Router returns a empty iterator, and a Dialog is associated with the outgoing request of the Transaction
 		then the Dialog route set is used to send the outgoing request.
-
-		This method implies that the application is functioning as either a UAC or a stateful proxy, hence the
-		underlying implementation acts statefully. 
 		"""
 
 		logger = logging.getLogger(self.LOGGER_NAME)
-
 		logger.debug('sendRequest()')
 
 		if not self.getState() is None:
-			raise EInvalidState('Request already sent')
+			raise ESipStackInvalidState('Request already sent')
 
 		request = self.getOriginalRequest()
 
@@ -1193,7 +1288,7 @@ class SipClientTransaction(SipTransaction):
 		if self.getState() in [SipTransaction.TRANSACTION_STATE_PROCEEDING, SipTransaction.TRANSACTION_STATE_CALLING]:
 
 			# if this is a TU-generated ACK request,
-			if request.getMethod() == Request.METHOD_ACK:
+			if request.getMethod() == SipRequest.METHOD_ACK:
 
 				# send directly to the underlying transport and close this transaction
 				if self.isReliable():
@@ -1213,9 +1308,9 @@ class SipClientTransaction(SipTransaction):
 
 			# change to trying/calling state 
 			# set state first to avoid race condition.. 
-			if request.getMethod() == Sip.METHOD_INVITE:
+			if request.getMethod() == SipRequest.METHOD_INVITE:
 				self.setState(SipTransaction.TRANSACTION_STATE_CALLING) 
-			elif request.getMethod() == Sip.METHOD_ACK:
+			elif request.getMethod() == SipRequest.METHOD_ACK:
 				# Acks are never retransmitted. 
 				self.setState(SipTransaction.TRANSACTION_STATE_TERMINATED)
 				# TODO: cleanUpOnTimer(); 
@@ -1228,6 +1323,176 @@ class SipClientTransaction(SipTransaction):
 			
 			self._sipStack.sendRequest(request);
 
+class SipServerTransaction(SipTransaction):
+	"""Receives Request and sends Response back to client
+	
+	This interfaces enables an application to send a Response to a recently
+	received Request in a transaction stateful way.
+
+	A new server transaction is generated in the following ways:
+
+	 * By the application by invoking the SipStack for Requests that the application wishes to handle.
+	 * By the SipStack by automatically populating the server transaction of a RequestEvent for
+	   Incoming Requests that match an existing Dialog. Note that a dialog-stateful application is
+	   automatically transaction stateful too 
+
+	A server transaction of the transaction layer is represented by a finite state machine that is
+	constructed to process a particular request. The transaction
+	layer handles application-layer retransmissions, matching of responses to requests, and application-layer timeouts.
+
+	The server transaction Id must be unique within the underlying implementation. This Id is commonly
+	taken from the branch parameter in the topmost Via header (for RFC3261 compliant clients), but may
+	also be computed as a cryptographic hash of the To tag, From tag, Call-ID header field, the Request-URI
+	of the request received (before translation), the topmost Via header, and the sequence number from the
+	CSeq header field, in addition to any Proxy-Require and Proxy-Authorization header fields that may be
+	present. The algorithm used to determine the id is implementation-dependent.
+
+	For the detailed server transaction state machines refer to Chapter 17 of RFC 3261, the allowable
+	transitions are summarized below:
+
+	Invite Transaction:
+	Proceeding -> Completed -> Confirmed -> Terminated
+
+	Non-Invite Transaction:
+	Trying -> Proceeding -> Completed -> Terminated 
+	"""
+
+	LOGGER_NAME = 'SipServerTransaction'
+
+	def __init__(self, sipStack, request):
+		SipTransaction.__init__(self, sipStack, request)
+
+	def enableRetransmissionAlerts(self):
+		"""Enable the timeout retransmit notifications for the ServerTransaction."""
+		pass
+
+	def sendResponse(self, response):
+		"""Sends the Response to a Request which is associated with this ServerTransaction.
+
+		Sends the Response to a Request which is associated with this ServerTransaction. When
+		an application wishes to send a Response, it creates a Response using the MessageFactory
+		and then passes that Response to this method. The Response message gets sent out on the
+		network via the ListeningPoint information that is associated with the SipProvider of
+		this ServerTransaction.
+
+		This method implies that the application is functioning as either a UAS or a stateful proxy,
+		hence the underlying implementation acts statefully. When a UAS sends a 2xx response to an INVITE,
+		the server transaction is transitions to the TerminatedState. The implementation may delay
+		physically removing ServerTransaction record from memory to catch retransmissions of the
+		INVITE in accordance with the reccomendation of http://bugs.sipit.net/show_bug.cgi?id=769 .
+
+		ACK Processing and final response retransmission:
+		If a Dialog is associated with the ServerTransaction then when the UAC sends the ACK
+		(the typical case for User Agents), the Application (i.e. Listener) will see
+		a ServerTransaction corresponding to the ACK and the corresponding Dialog presented to it.
+		The ACK will be presented to the Listener only once in this case. Retransmissions of the
+		OK and filtering of ACK retransmission are the responsibility of the Dialog layer of this
+		specification. However if no Dialog is associated with the INVITE Transaction, the ACK will
+		be presented to the Application with a null Dialog in the RequestEvent and there will be no
+		Dialog associated with the ACK Transaction (i.e. getDialog returns null). In this case
+		(when there is no Dialog associated with the original INVITE or ACK) the Application is
+		responsible for retransmission of the OK for the INVITE if necessary (i.e. if it wants to
+		manage its own dialog layer and function as a User Agent) and for dealing with retransmissions
+		of the ACK. This requires that the three way handshake of an INVITE is managed by the UAS
+		application and not the implementation of this specification.
+
+		Note that Responses created via Dialog should be sent using sendReliableProvisionalResponse 
+		"""
+
+		logger = logging.getLogger(self.LOGGER_NAME)
+		logger.debug('sendResponse() Enter')
+
+		if response is None:
+			raise ESipStackInvalidArgument()
+
+		# check for meaningful response.
+		cSeqHeader = response.getHeaderByType(SipCSeqHeader)
+		responseMethod = cSeqHeader.getMethod()
+		if not responseMethod == self.getOriginalRequest().getMethod():
+			raise ESipStackException('CSeq method does not match Request method of request that created the tx.')
+
+		statusCode = response.getStatusCode()
+
+		# 200-class responses to SUBSCRIBE requests also MUST contain an "Expires" header. The
+		# period of time in the response MAY be shorter but MUST NOT be longer than specified in
+		# the request.
+		#		if responseMethod == SipRequest.METHOD_SUBSCRIBE and statusCode / 100 == 2:
+		#			if not response.getHeaderByType(SipExpiresHeader) is None:
+		#				raise ESipStackException('Expires header is mandatory in 2xx response of SUBSCRIBE')
+		#			else:
+		#				requestExpires = self.getOriginalRequest().getExpires()
+		#				responseExpires = response.getExpires()
+		#				# If no "Expires" header is present in a SUBSCRIBE request, the implied default
+		#				# is defined by the event package being used.
+		#				if not requestExpires is None and responseExpires.getExpires() > requestExpires.getExpires():
+		#                    			raise ESipStackException('Response Expires time exceeds request Expires time : See RFC 3265 3.1.1')
+		#
+
+		# check for mandatory headers
+		if statusCode == Sip.RESPONSE_OK and responseMethod == SipRequest.METHOD_INVITE and response.getHeaderByType(ContactHeader) is None:
+			raise ESipStackException('Contact Header is mandatory for the OK to the INVITE')
+
+		#if not self.isMessagePartOfTransaction(response):
+		#	raise ESipStackException('Response does not belong to this transaction.')
+
+
+		# RFC18.2.2. Sending Responses
+		# The server transport uses the value of the top Via header field in order
+		# to determine where to send a response.  It MUST follow the following process:
+		# If the "sent-protocol" is a reliable transport protocol such as TCP or SCTP,
+		# or TLS over those, the response MUST be sent using the existing connection
+		# to the source of the original request that created the transaction, if that connection is still open.
+
+		#if self.isReliable():
+		#	self.getMessageChannel().sendMessage(response)
+		#else:
+
+		#via = response.getTopmostViaHeader()
+		#print via
+		#transport = via.getTransport()
+		#		if transport is None:
+		#			raise ESipStackException('missing transport!')
+		#		port = via.getRPort()
+		#		if port is None:
+		#			port = via.getPort()
+		#		if port is None:
+		#			if transport == Sip.TRANSPORT_TLS:
+		#				port = 5061
+		#			else:
+		#				port = 5060
+
+		#if not self.getState() in == SipTransaction.TRANSACTION_STATE_PROCEEDING:
+		#	raise ESipStackInvalidState('Transaction assigned Response already sent')
+
+		#self.getOriginalRequest().checkHeaders()
+
+		# Provided we have set the banch id for this we set the BID for the outgoing via.
+		#if not originalRequestBranch is None:
+		#	response.getTopmostVia().setBranch(self.getBranch())
+		#else:
+		#	response.getTopmostVia().removeParameter(SipResponse.PARAMETER_BRANCH);
+
+		# make the topmost via headers match identically for the transaction rsponse.
+		#if not originalRequestHasPort:
+		#	response.getTopmostVia().removePort()
+
+		#  method of the response does not match the request used to
+		#  create the transaction - transaction state does not change.
+		# send the message to the client. Record the last message sent out.
+		self.lastResponse = response
+		self.lastResponseStatusCode = response.getStatusCode()
+
+		# modify transaction state according to state machine
+		if response.getStatusCode() >= 200 and response.getStatusCode() <= 699:
+			# final responses
+			self.setState(SipTransaction.TRANSACTION_STATE_COMPLETED)
+		elif response.getStatusCode() >= 100 and response.getStatusCode() <= 199:
+			# provisional responses
+			self.setState(SipTransaction.TRANSACTION_STATE_PROCEEDING)
+
+		self._sipStack.sendResponse(response)
+
+		logger.debug('sendResponse() Leave')
 
 ###### authentication and authorization stuff ########################################
 
