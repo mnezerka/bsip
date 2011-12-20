@@ -21,55 +21,11 @@ class Sip(object):
 	BRANCH_MAGIC_COOKIE = 'z9hG4bK'
 
 
-	#confirms that client has received a final Response to an INVITE Request.
-	METHOD_ACK = 'ACK'
-
-	# Indicates to the server that client wishes to release the call leg.
-	METHOD_BYE = 'BYE'
-
-	# Cancels a pending User Agent Client Request.
-	METHOD_CANCEL = 'CANCEL'
-
-	# Indicates that user or service is being invited to participate in a session.
-	METHOD_INVITE = 'INVITE'
-
-	# Queries a server with regards to its capabilities.
-	METHOD_OPTIONS = 'OPTIONS'
-
-	# Registers contact information with a SIP server. 
-	METHOD_REGISTER = 'REGISTER'
-
-	# Used to carry session related control information that is generated during a session.
-	# This functionality is defined in RFC2976.
-	METHOD_INFO = 'INFO'
-
-	# Similiar in operation to ACK, however specific to the reliability of provisional
-	# Responses. This functionality is defined in RFC3262.
-	METHOD_PRACK = 'PRACK'
-
-	# Allows a client to update parameters of a session without impacting the state
-	# of a dialog. This functionality is defined in RFC3311.
-	METHOD_UPDATE = 'UPDATE'
-
-	# Provides an extensible framework by which SIP nodes can request notification
-	# from remote nodes indicating that certain events have occurred. This functionality is defined in RFC3265.
-	METHOD_SUBSCRIBE = 'SUBSCRIBE'
-
-	# Provides an extensible framework by which SIP nodes can get notification from remote nodes indicating
-	# that certain events have occurred. This functionality is defined in RFC3265.
-	METHOD_NOTIFY = 'NOTIFY'
-
-	# For sending instant messages using a metaphor similar to that of a two-way pager or SMS enabled
-	# handset. This functionality is defined in RFC3428.
-	METHOD_MESSAGE ='MESSAGE'
-
-	# re
-	METHOD_REFER = 'REFER'
   
 	@staticmethod
 	def getMethodNames():
-		result = [Sip.METHOD_ACK, Sip.METHOD_BYE, Sip.METHOD_CANCEL, Sip.METHOD_INVITE, Sip.METHOD_OPTIONS, Sip.METHOD_REGISTER,
-			Sip.METHOD_INFO, Sip.METHOD_PRACK, Sip.METHOD_UPDATE, Sip.METHOD_SUBSCRIBE, Sip.METHOD_NOTIFY, Sip.METHOD_MESSAGE, Sip.METHOD_REFER]
+		result = [SipRequest.METHOD_ACK, SipRequest.METHOD_BYE, SipRequest.METHOD_CANCEL, SipRequest.METHOD_INVITE, SipRequest.METHOD_OPTIONS, SipRequest.METHOD_REGISTER,
+			SipRequest.METHOD_INFO, SipRequest.METHOD_PRACK, SipRequest.METHOD_UPDATE, SipRequest.METHOD_SUBSCRIBE, SipRequest.METHOD_NOTIFY, SipRequest.METHOD_MESSAGE, SipRequest.METHOD_REFER]
 		return result
 
 	TRANSPORT_UDP = 'udp'
@@ -903,7 +859,7 @@ class SipFromHeader(SipAddressHeader):
 	def setTag(self, tag):
 		self[SipFromHeader.PARAM_TAG] = tag
 
-class SipContactHeader(SipAddressHeader):
+class ContactHeader(SipAddressHeader):
 
 	def __init__(self, body = None):
 		SipAddressHeader.__init__(self, 'Contact' , body)
@@ -1413,7 +1369,7 @@ class HeaderFactory(object):
 
 	HEADER_NAMES = {
 		'from' : SipFromHeader,
-		'contact': SipContactHeader,
+		'contact': ContactHeader,
 		'content-type': ContentTypeHeader,
 		'content-length': ContentLengthHeader,
 		'call-id' : SipCallIdHeader,
@@ -1569,7 +1525,7 @@ class SipMessage(object):
 
 
 	def getTransactionId(self):
-		"""Generate (compute) a transaction ID for this SIP message.
+		"""Generate (compute) a transaction ID unique for this SIP message.
 
 		return: A string containing the concatenation of various portions of the From,To,Via and
 		RequestURI portions of this message as specified in RFC 2543: All responses to a
@@ -1592,11 +1548,12 @@ class SipMessage(object):
 		# the transaction. BranchId is not case sensitive.
 		# Branch Id prefix is not case sensitive.
 		if not topVia is None and not topVia.getBranch() is None:
-			# Bis 09 compatible branch assignment algorithm.  // implies that the branch id can be used as a transaction // identifier.
+			# Bis 09 compatible branch assignment algorithm.
+   			# implies that the branch id can be used as a transaction identifier.
 			if cSeqHeader is None:
 				raise ESipMessageException('CSeq header is missing')
 
-			if cSeqHeader.getMethod() == Sip.METHOD_CANCEL:
+			if cSeqHeader.getMethod() == SipRequest.METHOD_CANCEL:
 			    return (topVia.getBranch() + ':' + cSeqHeader.getMethod()).lower()
 			else:
 			    return topVia.getBranch().lower()
@@ -1609,24 +1566,73 @@ class SipMessage(object):
 
 			if not fromHeader.getTag() is None:
 				result += fromHeader.getTag() + '-'
-			cid = callIdHeader.getCallId()
-			result += cid + '-'
-			result += cSeqHeader.getSeqNumber() + '-' + cSeqHeader.getMethod()
+			if not callIdHeader is None:
+				cid = callIdHeader.getCallId()
+				result += cid + '-'
+			result += str(cSeqHeader.getSeqNumber()) + '-' + cSeqHeader.getMethod()
 
-			if not topVia is None:
-				result += '-' + topVia.getSentBy().encode()
+			# TODO:
+			#if not topVia is None:
+			#	result += '-' + topVia.getSentBy().encode()
+			#	if not topVia.getSentBy().hasPort():
+                 	#		result += '-5060'
 
-				if not topVia.getSentBy().hasPort():
-                 			result += '-5060'
-
-			if cSeqHeader.getMethod() == Sip.METHOD_CANCEL:
-				result += Sip.METHOD_CANCEL
+			if cSeqHeader.getMethod() == SipRequest.METHOD_CANCEL:
+				result += SipRequest.METHOD_CANCEL
 		
 		return result.lower().replace(':', '-').replace('@', '-') + '-' + SipUtils.generateSignature()
 
 
 class SipRequest(SipMessage):
 	"""Sip Request"""
+
+	# rfc3261 - confirms that client has received a final Response to an INVITE Request.
+	METHOD_ACK = 'ACK'
+
+	# rfc3261 - Indicates to the server that client wishes to release the call leg.
+	METHOD_BYE = 'BYE'
+
+	# rfc3261 - Cancels a pending User Agent Client Request.
+	METHOD_CANCEL = 'CANCEL'
+
+	# rfc3261 - Indicates that user or service is being invited to participate in a session.
+	METHOD_INVITE = 'INVITE'
+
+	# rfc3261 - Queries a server with regards to its capabilities.
+	METHOD_OPTIONS = 'OPTIONS'
+
+	# rfc3261 - Registers contact information with a SIP server. 
+	METHOD_REGISTER = 'REGISTER'
+
+	# rfc2976 - Used to carry session related control information that is generated during a session.
+	# This functionality is defined in RFC2976.
+	METHOD_INFO = 'INFO'
+
+	# rfc3262 - Similiar in operation to ACK, however specific to the reliability of provisional
+	# Responses. This functionality is defined in RFC3262.
+	METHOD_PRACK = 'PRACK'
+
+	# rfc3311 - Allows a client to update parameters of a session without impacting the state
+	# of a dialog. This functionality is defined in RFC3311.
+	METHOD_UPDATE = 'UPDATE'
+
+	# rfc3265 - Provides an extensible framework by which SIP nodes can request notification
+	# from remote nodes indicating that certain events have occurred. This functionality is defined in RFC3265.
+	METHOD_SUBSCRIBE = 'SUBSCRIBE'
+
+	# rfc3265 - Provides an extensible framework by which SIP nodes can get notification from remote nodes indicating
+	# that certain events have occurred. This functionality is defined in RFC3265.
+	METHOD_NOTIFY = 'NOTIFY'
+
+	# rfc3428 - For sending instant messages using a metaphor similar to that of a two-way pager or SMS enabled
+	# handset. This functionality is defined in RFC3428.
+	METHOD_MESSAGE ='MESSAGE'
+
+	# rfc3515 - requests that the recipient REFER to a resource provided in the request 
+	METHOD_REFER = 'REFER'
+
+	# rfc3903 - for publishing event state 
+	METHOD_PUBLISH = 'PUBLISH'
 
 	def __init__(self):
 		SipMessage.__init__(self)
@@ -1654,7 +1660,7 @@ class SipRequest(SipMessage):
 		#requiredHeaders = [SipFromHeader, SipToHeader, SipCSeqHeader, SipCallIdHeader, MaxForwardsHeader, SipViaHeader]
 		requiredHeaders = [SipFromHeader, SipToHeader, SipCSeqHeader, SipCallIdHeader, SipViaHeader]
         	# Contact (only for INVITE)
-		if self._method == Sip.METHOD_INVITE:
+		if self._method == SipRequest.METHOD_INVITE:
 			requiredHeaders.append(ContactHeader)
 
 		for rh in requiredHeaders:
@@ -1706,7 +1712,7 @@ class MessageFactory(object):
 		response.setStatusCode(statusCode)
 		response.setReasonPhrase('OK')
 		for header in request.getHeaders():
- 			if isinstance(header, (SipToHeader, SipFromHeader, SipCallIdHeader, SipCSeqHeader, SipContactHeader, SipViaHeader)):
+ 			if isinstance(header, (SipToHeader, SipFromHeader, SipCallIdHeader, SipCSeqHeader, ContactHeader, SipViaHeader)):
 				response.addHeader(header)
 		return response
 
