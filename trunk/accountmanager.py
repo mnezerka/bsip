@@ -1,7 +1,25 @@
 import hashlib
 
 class AccountManager(object):
-	pass
+	
+	def __init__(self):
+		self._users = dict()
+		pass
+
+	def getUserByUserName(self, username):
+		if username in self._users:
+			return self._users[username]
+
+	def add(self, user, default = False):
+		self._users[user.getUserName()] = user
+		if default:
+			self.setDefaultUser(user)
+
+	def setDefaultUser(self, user):
+		self._defaultUser = user
+
+	def getDefaultUser(self):
+		return self._defaultUser
 
 class User(object):
 

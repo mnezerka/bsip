@@ -9,6 +9,7 @@ import threading
 import logging
 import time
 import hashlib
+import copy
 
 from sipmessage import *
 #from accountmanager import *
@@ -89,7 +90,6 @@ class SipRequestEvent(object):
 		pass
 
 class SipResponseEvent(object):
-
 	def __init__(self, source, response, clientTransaction = None, dialog = None):
 		# the source of the event i.e. the SipProvider sending the ResponseEvent.
 		self._source = source
@@ -131,7 +131,6 @@ class SipResponseEvent(object):
 	def getSource(self):
 		return self._source
 
-
 class SipListener(object):
 	"""This interface represents the application view to a SIP stack
 	therefore defines the application's communication channel to the
@@ -162,9 +161,6 @@ class SipListener(object):
 	def processTransactionTerminated(self, transactionTerminatedEvent):
 		"""Process an asynchronously reported TransactionTerminatedEvent."""
 		raise EInterfaceCall()
-
-
-
 
 class IpProcessor(object):
 	"""Abstract class for all Ip processors"""
@@ -220,6 +216,8 @@ class SipListeningPoint(IpProcessor):
 			logger.debug('ESipStackException when parsing message')
 			return
 
+		self._sipStack.processMessageReceive(msg)
+
 		event = None
 
 		createTransactions = self._sipStack[SipStack.PARAM_CREATE_TRANSACTIONS]
@@ -266,9 +264,6 @@ class SipListeningPoint(IpProcessor):
 			# identify (match) client transaction
 			clientTransaction = self._sipStack.getClientTransactionForResponse(msg)
 
-			if createTransactions and clientTransaction is None:
-				clientTransaction = self._sipStack.createClientTransaction(msg)
-
 			#  modify transaction state according to state machine and response code
 			if not clientTransaction is None:
 				if msg.getStatusCode() >= 200 and msg.getStatusCode() <= 699:
@@ -282,14 +277,18 @@ class SipListeningPoint(IpProcessor):
 			# create new ResponseEvent
 			event = SipResponseEvent(self, msg, clientTransaction, dialog)
 
+		# allow message preprocessing
+		blockListeners = self._sipStack.preprocessSipEvent(event)
+
 		# notify listeners
-		for listener in self._sipStack.getSipListeners():
-			if isinstance(msg, sipmessage.SipRequest):
-				listener.processRequest(event)
-			elif isinstance(msg, sipmessage.SipResponse):
-				listener.processResponse(event)
-			else: 
-				listener.processIOException("x")
+		if not blockListeners:
+			for listener in self._sipStack.getSipListeners():
+				if isinstance(msg, sipmessage.SipRequest):
+					listener.processRequest(event)
+				elif isinstance(msg, sipmessage.SipResponse):
+					listener.processResponse(event)
+				else: 
+					listener.processIOException("x")
 
 		logger.debug('onData() Leave')
 
@@ -309,7 +308,6 @@ class SipListeningPoint(IpProcessor):
 		return result
 
 class IpDispatcher(object):
-
 	LOGGER_NAME = 'ipdispatcher'
 
 	PROTO_TCP = 'tcp'
@@ -470,7 +468,6 @@ class IpDispatcher(object):
 
 #### ip networking thread #################################
 class IpNetworkThread(threading.Thread):
-
 	LOGGER_NAME = 'ip_network_thread'
 
 	def __init__(self, ipDispatcher, queue):
@@ -595,7 +592,6 @@ class WorkerEventStop(IWorkerEvent):
 	"""Thread stop event"""
 	pass
 
-		
 class WorkerThread(threading.Thread):
 	"""Worker thread implementation"""
 
@@ -639,9 +635,18 @@ class WorkerThread(threading.Thread):
 
 		logger.debug('Finishihg worker thread' + self.getName())
 
+class SipInterceptor(object):
 
+	def onMessageSend(self, msg):
+		pass
 
+	def onMessageReceive(self, msg):
+		pass
 
+	def onEvent(self, msg):
+		pass
+
+#### sip stack #######################################
 
 class SipStack(dict):
 	"""This class represents the SIP protocol stack.
@@ -695,6 +700,7 @@ class SipStack(dict):
 		self._clientTransactions = {} 
 		self._serverTransactions = {} 
 		self._sipListeners = []
+		self._sipInterceptors = []
 
 		# process properties
 		if properties is None or not type(properties).__name__ == 'dict':
@@ -711,7 +717,6 @@ class SipStack(dict):
 		# create ip dispatcher
 		self._ipDispatcher = IpDispatcher()
 
-
 	def getSipListeners(self):
 		return self._sipListeners
 
@@ -724,6 +729,8 @@ class SipStack(dict):
 	def addSipListener(self, sipListener):
 		self._sipListeners.append(sipListener)
 
+	def addSipInterceptor(self, preprocessor):
+		self._sipInterceptors.append(preprocessor)
 
 	def start(self):
 		"""This method initiates the active processing of the stack."""
@@ -754,7 +761,6 @@ class SipStack(dict):
 		return self._state == SipStack.STATE_RUNNING
 
 	def getNextHop(self, request):
-
 		logger = logging.getLogger(self.LOGGER_NAME)
 		logger.debug('getNextHop() Enter')
 
@@ -778,14 +784,12 @@ class SipStack(dict):
 		return result
 
 	def addListeningPoint(self, listeningPoint):
-
 		key = listeningPoint.getKey()
 
 		if not key in self._listeningPoints.keys():
 			self._listeningPoints[key] = listeningPoint
 
 	def getListeningPointForTransport(self, transport = None):
-
 		logger = logging.getLogger(self.LOGGER_NAME)
 		logger.debug('getListeningPointForTransport() Entering, transport=%s', transport)
 
@@ -811,7 +815,6 @@ class SipStack(dict):
 		return result
 
 	def fixViaHeaders(self, sipMessage, sipListeningPoint):
-
 		logger = logging.getLogger(self.LOGGER_NAME)
 		logger.debug('fixViaHeaders() Enter')
 
@@ -876,6 +879,10 @@ class SipStack(dict):
 
 		self.fixViaHeaders(request, lp)
 
+		# notify all interceptors
+		for si in self._sipInterceptors:
+			si.onMessageSend(request)
+
 		message = str(request)
 
 		localIpAddress = lp.getIpAddress()
@@ -939,6 +946,10 @@ class SipStack(dict):
 
 		#localAddress = self.__sipStack.getIpAddress()
 
+		# notify all interceptors
+		for si in self._sipInterceptors:
+			si.onMessageSend(request)
+
 		message = str(response)
 
 		localAddress = lp.getIpAddress()
@@ -961,7 +972,6 @@ class SipStack(dict):
 		tranId = request.getTransactionId()
 		logger.debug('getServerTransactionForRequest() looking for server transaction identified by %s' % tranId)
 		return self._serverTransactions[tranId] if tranId in self._serverTransactions else None
-
 
 	def getClientTransactionForResponse(self, response):
 		"""Find client transaction to be assigned to response
@@ -986,7 +996,6 @@ class SipStack(dict):
 		return self._clientTransactions[tranId] if tranId in self._clientTransactions else None
 
 	def createClientTransaction(self, request):
-
 		logger = logging.getLogger(self.LOGGER_NAME)
 		logger.debug('createClientTransaction() Enter')
 
@@ -1050,7 +1059,6 @@ class SipStack(dict):
 		return ct 
 
 	def createServerTransaction(self, request):
-
 		logger = logging.getLogger(self.LOGGER_NAME)
 		logger.debug('createServerTransaction() Enter')
 
@@ -1093,6 +1101,39 @@ class SipStack(dict):
 		logger.debug('getTransactionForMessage() returning: ' + str(result))
 		logger.debug('getTransactionForMessage() Leave')
 		return result 
+		for si in self._sipInterceptors:
+			si.onMessageReceive(request)
+		for si in self._sipInterceptors:
+			si.onMessageReceive(request)
+
+	def processMessageReceive(self, msg):
+		"""Allow all message interceptors to do their work.
+
+		Returns "True" if message shoudln't be processed, else "False" 
+		"""
+
+		result = False
+		for si in self._sipInterceptors:
+			result = result or si.onMessageReceive(msg)
+		return result
+
+	def preprocessSipEvent(self, event):
+		"""Allow all event preprocessors to do its work.
+
+		Each preprocessor can force stop delivery of event to application
+
+		Returns "True" if message shoudln't be sent to application, else "False" 
+		"""
+
+		# default value - event will be delivered to application
+		result = False
+		logger = logging.getLogger(self.LOGGER_NAME)
+		logger.debug('preprocessSipEvent() Enter')
+		for si in self._sipInterceptors:
+			result = result or si.onEvent(event)
+		logger.debug('preprocessSipEvent() Leave')
+		return result
+
 
 ####### sip transactions ###############################################
 
@@ -1253,6 +1294,20 @@ class SipClientTransaction(SipTransaction):
 
 	def createAck(self):
 		"""Creates a new Ack message from the Request associated with this client transaction."""
+
+		logger = logging.getLogger(self.LOGGER_NAME)
+		logger.debug('createAck() Enter')
+
+		#if changing state to completed, send ACK
+		create Ack
+
+		slef.sendMessage(ackRequest)
+
+		# parent method
+		SipTransaction.setState(self, state)
+
+		logger.debug('createAck() Leave')
+
 		raise ENotImplemented()
 
 	def createCancel(self):
@@ -1322,6 +1377,20 @@ class SipClientTransaction(SipTransaction):
 			# TODO Enable appropriate timers
 			
 			self._sipStack.sendRequest(request);
+
+	def setState(self, state):
+		"""Sets new state of the transaction"""
+
+		logger = logging.getLogger(self.LOGGER_NAME)
+
+		#if changing state to completed, send ACK
+		create Ack
+
+		slef.sendMessage(ackRequest)
+
+		# parent method
+		SipTransaction.setState(self, state)
+
 
 class SipServerTransaction(SipTransaction):
 	"""Receives Request and sends Response back to client
@@ -1495,88 +1564,198 @@ class SipServerTransaction(SipTransaction):
 		logger.debug('sendResponse() Leave')
 
 ###### authentication and authorization stuff ########################################
-
-class Authenticator(object):
+class DigestAuthenticator(SipInterceptor):
 	"""A helper class that provides useful functionality for clients that need to authenticate with servers."""
 
 	ALG_MD5 = 'md5'
 
-	LOGGER_NAME = 'authenticator'
+	LOGGER_NAME = 'digestauthenticator'
+	QOP_PREFERENCE_LIST = { 'auth': 1, 'auth-int': 2} 
 
-	def __init__(self, headerFactory):
-		self.__cachedCredentials = []
-		self.__headerFactory = headerFactory
+	def __init__(self, sipStack, accountManager):
+		self._cachedCredentials = dict()
+		self._sipStack = sipStack 
+		self._accountManager = accountManager
 
-	def getAuthorization(self, method, uri, requestBody, authHeader, userCredentials):
-		"""Generates an authorization header in response to WwwAuthenticationHeader"""
+	def handleChallenge(self, response, originalRequest):
+		""" Server sent a challenge and waits for same request with authorization header"""
 
 		logger = logging.getLogger(self.LOGGER_NAME)
-		logger.debug('getAuthorization() Enter')
+		logger.debug('handleChallenge() Enter')
 
-		qopPreferenceList = { 'auth': 1, 'auth-int': 2} 
-	
-		# authHeader.getQop() is a quoted _list_ of qop values
-		#(e.g. "auth,auth-int") Client is supposed to pick one
+		authHeader = response.getHeaderByType(WwwAuthenticateHeader)
+		if authHeader is None:
+			authHeader = response.getHeaderByType(ProxyAuthenticateHeader)
+		if authHeader is None:
+			raise ESipStackException('Could not find WWWAuthenticate or ProxyAuthenticate header');
+
+		# create new request instance
+		request = copy.deepcopy(originalRequest)
+
+		# get user to be used for authentication 
+		fromHeader = request.getHeaderByType(SipFromHeader)
+		fromUri = fromHeader.getAddress().getUri()
+		user = self._accountManager.getUserByUserName(fromUri.getUser())
+		if user is None:
+			raise ESipStackException('No user credentials provided for authentication')
+
+		# increment cseq
+		cSeq = request.getHeaderByType(SipCSeqHeader)
+               	cSeq.setSeqNumber(cSeq.getSeqNumber() + 1l)
+
+		# set new tag and branch to avoid of interaction with old transaction(s)
+		fromHeader.setTag(SipUtils.generateTag())
+		topVia = request.getTopmostViaHeader()
+		topVia.setBranch(SipUtils.generateBranchId())
+
+		# take decision what kind of "quality of protection will be used"
+		# authHeader.getQop() is a quoted _list_ of qop values(e.g. "auth,auth-int") Client is supposed to pick one
 		qopList = authHeader.getQop()
 		qop = 'auth' 
-		qopPreferenceValue = qopPreferenceList[qop]
+		qopPreferenceValue = self.QOP_PREFERENCE_LIST[qop]
 		if not qopList is None:
 			qopTypes = qopList.split(',')
 			# select quality of protection according to bsip preference (most secure has higher priority)
 			for qopType in qopTypes:
-				if qopType.strip() in qopPreferenceList:
-					if qopPreferenceList[qopType.strip()] > qopPreferenceValue:
-						qopPreferenceValue = qopPreferenceList[qopType.strip()]
+				if qopType.strip() in self.QOP_PREFERENCE_LIST:
+					if self.QOP_PREFERENCE_LIST[qopType.strip()] > qopPreferenceValue:
+						qopPreferenceValue = self.QOP_PREFERENCE_LIST[qopType.strip()]
 						qop = qopType.strip() 
 
 		logger.debug('getAuthorization() selected qop is: %s', qop)
 
-		nc_value = 1 
-		cnonce = 'xyz'
+		# create new authorization record
+		authParams = dict({
+			"user": user.getUserName(),
+			"authusername": user.getAuthUserName(),
+			"userauthhash": user.getHashUserDomainPassword(),
+			Header.PARAM_QOP: qop,
+			Header.PARAM_ALGORITHM: authHeader.getAlgorithm(),
+			Header.PARAM_REALM: authHeader.getRealm(),
+			Header.PARAM_NONCE: authHeader.getNonce(),
+			Header.PARAM_NC: 0,
+			Header.PARAM_OPAQUE: authHeader.getOpaque(),
+			Header.PARAM_URI: str(request.getRequestUri()),
+			"method": request.getMethod(),
+			Header.PARAM_CNONCE: "xyz",
+			"classname": ProxyAuthorizationHeader if isinstance(authHeader, ProxyAuthenticateHeader) else AuthorizationHeader})
 
-		response = MessageDigestAlgorithm.calculateResponse(
-			authHeader.getAlgorithm(),
-			userCredentials.getHashUserDomainPassword(),
-			authHeader.getNonce(),
-			nc_value,
-			cnonce,
-			method,
-			uri,
-			requestBody,
-			qop)
+		# store record to cache
+		cacheId = "%s@%s" % (fromUri.getUser(), fromUri.getHost())
+		if not cacheId in self._cachedCredentials:
+			self._cachedCredentials[cacheId] = dict()
+		self._cachedCredentials[cacheId][authParams[Header.PARAM_REALM]] = authParams
 
-		authorization = None;
-		
-		if isinstance(authHeader, ProxyAuthenticateHeader):
-			authorization = self.__headerFactory.createProxyAuthorizationHeader(authHeader.getScheme())
-		else:
-			authorization = self.__headerFactory.createAuthorizationHeader(authHeader.getScheme())
+		logger.debug('handleChallenge() Leave')
+		return request
 
-		authorization.setScheme(authHeader.getScheme())
-		authorization.setUserName(userCredentials.getAuthUserName())
-		authorization.setRealm(authHeader.getRealm())
-		authorization.setNonce(authHeader.getNonce())
-		authorization.setUri(uri)
-		authorization.setResponse(response);
+	def createDigestAuthorizationHeader(self, authParams, response):
+		"""Helper function for construction authorization header with correct set of parameters"""
+		logger = logging.getLogger(self.LOGGER_NAME)
+		logger.debug('createAuthorizationHeader() Enter')
 
+		result = authParams["classname"]()
+		result.setScheme('Digest')
+		result.setUserName(authParams["authusername"])
+		result.setRealm(authParams[Header.PARAM_REALM])
+		result.setNonce(authParams[Header.PARAM_NONCE])
+		result.setUri(authParams[Header.PARAM_URI])
+		result.setResponse(response)
 			
-		if not authHeader.getAlgorithm() is None:
-			authorization.setAlgorithm(authHeader.getAlgorithm())
+		if not authParams[Header.PARAM_ALGORITHM] is None:
+			result.setAlgorithm(authParams[Header.PARAM_ALGORITHM])
 
-		if not authHeader.getOpaque() is None:
-			authorization.setOpaque(authHeader.getOpaque())
+		if not authParams[Header.PARAM_OPAQUE] is None:
+			result.setOpaque(authParams[Header.PARAM_OPAQUE])
 
-		if not qopList is None:
-			authorization.setQop(qop)
-			authorization.setNC(nc_value)
-			authorization.setCNonce(cnonce)
+		if not authParams[Header.PARAM_QOP] is None:
+			result.setQop(authParams[Header.PARAM_QOP])
+			result.setNC(authParams[Header.PARAM_NC])
+			result.setCNonce(authParams[Header.PARAM_CNONCE])
 
-		authorization.setResponse(response)
+		result.setResponse(response)
+		logger.debug('createAuthorizationHeader() Leave')
+        	return result 
 
-		logger.debug('getAuthorization() Leave')
+	def onEvent(self, event):
+		logger = logging.getLogger(self.LOGGER_NAME)
+		logger.debug('onEvent() Enter')
 
-        	return authorization
+		result = False
 
+		if isinstance(event, SipResponseEvent):
+			response = event.getResponse()
+			logger.debug("preprocessing response: %d %s" % (response.getStatusCode(),  response.getReasonPhrase()))
+			tran = event.getClientTransaction()
+			if tran is None:
+				logger.debug("leaving, client transaction not available")
+				return
+
+			if response.getStatusCode() == 401 or response.getStatusCode() == 407:
+				request = self.handleChallenge(response, tran.getOriginalRequest())
+				tran = self._sipStack.createClientTransaction(request)
+				logger.debug("creating authentication transaction, response will not be delivered to application")
+				tran.sendRequest()
+				result = True
+			else:
+				authInfoHeader = response.getHeaderByType(AuthenticationInfoHeader)
+				# TODO update cache 
+				#callId = response.getCallId() 
+				#if not authInfoHeader is None and not callId is None:
+				#	nextNonce = authInfoHeader.getNextNonce()
+				#	if callId in self._cachedCredentials:
+				#		logger.debug("updating old nonce stored for call-id %s read from authentication-info header" % callId)
+				#		#self._cachedCredentials[callId]["nonce"] = nextNonce
+
+		logger.debug('onEvent() Leave')
+
+		return result
+
+	def onMessageSend(self, msg):
+		logger = logging.getLogger(self.LOGGER_NAME)
+		logger.debug('onMessageSend() Enter')
+
+		fromHeader = msg.getHeaderByType(SipFromHeader)
+		fromUri = fromHeader.getAddress().getUri()
+		cacheId = "%s@%s" % (fromUri.getUser(), fromUri.getHost())
+		if  cacheId in self._cachedCredentials:
+			logger.debug("found cache entry for cache id %s" % cacheId)
+			allRealmAuthParams = self._cachedCredentials[cacheId]
+
+			# look for realm
+			authorizationHeader = msg.getHeaderByType(AuthorizationHeader)	
+			realm = None
+			if not authorizationHeader is None:
+				# get realm from authorization header
+				realm = authorizationHeader.getRealm()
+			else:
+				# TODO:
+				# use first realm from user cache since no other information is available
+				for realm in allRealmAuthParams:
+					print realm 
+					break
+
+			logger.debug("following realm will be used for authorization: %s" % realm)
+
+			if not realm is None and realm in allRealmAuthParams:
+				authParams = allRealmAuthParams[realm]
+				authParams[Header.PARAM_NC] = authParams[Header.PARAM_NC] + 1
+				msg.removeHeadersByType(AuthorizationHeader)
+
+				response = MessageDigestAlgorithm.calculateResponse(
+					authParams[Header.PARAM_ALGORITHM],
+					authParams["userauthhash"],
+					authParams[Header.PARAM_NONCE],
+					authParams[Header.PARAM_NC],
+					authParams[Header.PARAM_CNONCE],
+					authParams["method"],
+					authParams[Header.PARAM_URI],
+					msg.getContent(),
+					authParams[Header.PARAM_QOP])
+
+				authorizationHeader = self.createDigestAuthorizationHeader(authParams, response)
+				msg.addHeader(authorizationHeader)
+		logger.debug('onMessageSend() Leave')
 
 class MessageDigestAlgorithm(object):
 	"""The class takes standard Http Authentication details and returns a
@@ -1616,11 +1795,15 @@ class MessageDigestAlgorithm(object):
 
 		logger = logging.getLogger(MessageDigestAlgorithm.LOGGER_NAME)
 		logger.debug('calculateResponse() Enter')
+		# fix message body
+		if entity_body is None:
+			entity_body = ''
+
 		logger.debug('trying to authenticate using: algorithm=%s, credentials_hash=%s, nonce=%s, nc=%s, cnonce=%s, method=%s, digest_uri=%s, datalen=%d, qop=%s',
 			algorithm, hashUserNameRealmPasswd, nonce_value, nc_value, cnonce_value, method, digest_uri_value, len(entity_body), qop_value)
 
 		# check required parameters
- 		if hashUserNameRealmPasswd is None or  method is None or digest_uri_value is None or nonce_value is None:
+ 		if hashUserNameRealmPasswd is None or method is None or digest_uri_value is None or nonce_value is None:
 			raise EInvalidArgument('Not enought parameters to calculate digest response')
 
 		# The following follows closely the algorithm for generating a response
@@ -1632,8 +1815,6 @@ class MessageDigestAlgorithm(object):
 		if qop_value is None or len(qop_value.strip()) == 0 or qop_value.strip().lower() == 'auth':
 			A2 = method + ":" + digest_uri_value
 		else:
-			if entity_body is None:
-				entity_body = ''
 			A2 = method + ':' + digest_uri_value + ':' + MessageDigestAlgorithm.H(entity_body);
 
 		request_digest = None;
