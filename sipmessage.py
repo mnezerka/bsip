@@ -3,6 +3,7 @@
 import unittest
 import random
 import time
+import copy
 #import re
 #import urlparse
 
@@ -47,7 +48,6 @@ class Sip(object):
 	RESPONSE_PROXY_AUTHENTICATION_REQUIRED = 407
 
 class SipUtils(object):
-
 	DIGEST_POOL_SIZE = 20
 
 	@staticmethod
@@ -90,7 +90,6 @@ class SipUtils(object):
 		return SipUtils.generateBranchId()
 
 class HttpUtils():
-
 	@staticmethod
 	def parseHttpList(s):
 		"""Parse lists as described by RFC 2068 Section 2.
@@ -133,26 +132,23 @@ class HttpUtils():
 			
 		return [part.strip() for part in res] 
 
-
 class Uri(dict):
-	
 	SCHEME_SIP = 'sip'
 
 	def __init__(self):
-		self.__scheme = None
+		self._scheme = None
 		dict.__init__(self)
 			
 	def getScheme(self):
 		"""Returns the value of the "scheme" of this URI, for example "sip", "sips" or "tel"."""
-		return self.__scheme
+		return self._scheme
 
 	def setScheme(self, scheme):
-		self.__scheme = scheme	
+		self._scheme = scheme	
 
 	def isSipURI(self):
 		"""This method determines if this is a URI with a scheme of "sip" or "sips"."""
 		raise ESipMessageNotImplemented()
-
 
 class SipUri(Uri):
 	"""This class represents SIP URIs, that may have either a sip: or sips: scheme. 
@@ -240,8 +236,7 @@ class SipUri(Uri):
 
 	def getHost(self):
 		"""Returns the host part of this SipURI."""
-		raise ENotImplemented()
-
+		return self._host
 	def setHost(self, host):
 		"""Set the host part of this SipURI to the newly supplied host parameter."""
 		self._host = host
@@ -288,7 +283,7 @@ class SipUri(Uri):
 
 	def getUser(self):
 		"""Returns the user part of this SipURI."""
-		raise ENotImplemented()
+		return self._user
 
 	def setUser(self, user):
 		"""Sets the user of SipURI."""
@@ -355,8 +350,6 @@ class SipUri(Uri):
 		result += paramStr
 		
 		return result 
-
-	
 
 class SipAddress(object):
 	"""This class represents a user's display name and URI address. The display name of
@@ -479,16 +472,22 @@ class Hop(object):
 
 		return result
 
-
-
 ######## headers ################3
 
 class MediaType(object):
 	"""This class represents media type methods for any header that contain content type and content sub-type values."""
 
-	def __init__(self):
+	def __init__(self, body = None):
 		self._contentType = None
 		self._contentSubType = None
+
+		if body is not None:
+			(type, sep, subType) = body.partition('/')
+			if len(sep) > 0:
+				self._contentType = type.strip()
+				self._contentSubType= subType.strip()
+			else:
+				raise ESipMessageException('Invalid format for media type header')
 
 	def getContentType(self):
 		"""Gets media type of Header with Content type."""
@@ -512,9 +511,7 @@ class MediaType(object):
 			result = self._contentType + '/' + self._contentSubType
 		return result
 
-
 class Header(object):
-
 	PARAM_ACTION = 'action';
 	PARAM_ALERT = 'alert';
 	PARAM_ALGORITHM = 'algorithm';
@@ -592,6 +589,51 @@ class Header(object):
 	def setBody(self, body):
 		self.__body = body
 
+class AuthenticationInfoHeader(Header, dict):
+	"""The AuthenticationInfo header implementation"""
+
+	def __init__(self, body = None):
+		Header.__init__(self, 'Authentication-Info', body)
+		dict.__init__(self)
+
+		if not body is None:
+			# parse address
+			params = HttpUtils.parseHttpList(body)
+			for param in params:
+				(key, sep, value) = param.partition('=')
+				if len(sep) == 0:
+					raise ESipMessageException("Cannot parse parameter:" + param)
+				# remove quotes
+				value = value.replace('"', '')
+				self[key.strip()] = value.strip()
+
+	def getNextNonce(self):
+		"""Returns the Nonce value of this AuthenticationHeader."""
+		return self[Header.PARAM_NEXT_NONCE] if Header.PARAM_NEXT_NONCE in self else None
+
+	def setNextNonce(self, nonce):
+		"""Sets the Nonce of the AuthenticationHeader to the nonce parameter value."""
+		self[Header.PARAM_NEXT_NONCE] = nonce
+
+	def __str__(self):
+		result = self.getName() + ': '
+	
+		params = ''
+		for p in self:
+			if len(params) > 0:
+				params +=', '
+			value = self[p]
+			if p == Header.PARAM_NC:
+				value = str(value)
+			else:
+				value = '"' + str(value) + '"'
+			params += p + '=' + value
+
+		if len(params) > 0:
+			result += ' ' + params 
+
+		return result
+
 class AuthenticationHeader(Header, dict):
 	"""The generic AuthenticationHeader"""
 
@@ -655,7 +697,7 @@ class AuthenticationHeader(Header, dict):
 
 	def getNC(self):
 		"""Returns the NC (Nonce Count) value."""
-		return self.getParameter(AuthenticationHeader.PARAM_NC)
+		return self.get(Header.PARAM_NC)
 
 	def setNC(self, nc):
 		"""Sets the NC (Nonce Count)."""
@@ -719,7 +761,7 @@ class AuthenticationHeader(Header, dict):
 
 	def getUserName(self):
 		"""Returns the Username value of this AuthenticationHeader."""
-		return self.getParameter(AuthenticationHeader.PARAM_USERNAME)
+		return self[Header.PARAM_USERNAME] if Header.PARAM_USERNAME in self else None
 
 	def setUserName(self, userName):
 		"""Sets the Username of the AuthenticationHeader to the username parameter value."""
@@ -784,12 +826,19 @@ class AuthorizationHeader(AuthenticationHeader):
 	def __init__(self, body = None):
 		AuthenticationHeader.__init__(self, 'Authorization', body)
 
+class ProxyAuthorizationHeader(AuthenticationHeader):
+	"""Same meaning as in case of Authorization header"""
+
+	def __init__(self, body = None):
+		AuthenticationHeader.__init__(self, 'Proxy-Authorization', body)
+
 
 class SipAddressHeader(Header, dict):
 	"""Abstract class: Sip Address header"""
 
 	def __init__(self, name, body = None):
 		Header.__init__(self, name, body)
+		dict.__init__(self)
 		self.__address = None
 
 		if not body is None:
@@ -821,7 +870,6 @@ class SipAddressHeader(Header, dict):
 		return result
 
 class SipCallIdHeader(Header):
-
 	def __init__(self, body = None):
 		Header.__init__(self, 'Call-Id' , body)
 		self.__callId = None
@@ -841,36 +889,32 @@ class SipCallIdHeader(Header):
 		result += self.__callId 
 		return result
 
-
 class SipFromHeader(SipAddressHeader):
-
-	PARAM_TAG = 'tag'
-
 	def __init__(self, body = None):
 		SipAddressHeader.__init__(self, 'From' , body)
-		self.__tag = None
 			
 	def getTag(self):
-		if SipFromHeader.PARAM_TAG in self:
-			return self[SipFromHeader.PARAM_TAG]
-		else:
-			return None 
+		return self.get(Header.PARAM_TAG)
 
 	def setTag(self, tag):
-		self[SipFromHeader.PARAM_TAG] = tag
+		if tag is None:
+			self.pop(Header.PARAM_TAG)
+		else:
+			self[Header.PARAM_TAG] = tag
 
 class ContactHeader(SipAddressHeader):
-
 	def __init__(self, body = None):
 		SipAddressHeader.__init__(self, 'Contact' , body)
 
 class ContentLengthHeader(Header):
-	
 	def __init__(self, body = None):
 		Header.__init__(self, 'Content-Length' , body)
-		self.__contentLength = None
-		if body is not None and body.isdigit():
-			self.__contentLength = int(body)
+		self._contentLength = None
+		if body is not None:
+			if isinstance(body, int):
+				self._contentLength = body
+			elif isinstance(body, str) and body.isdigit():
+				self.__contentLength = int(body)
 	
 	def getContentLength(self):
 		return self.__contentLength
@@ -879,10 +923,9 @@ class ContentLengthHeader(Header):
 		self.__contentLength = val
 
 class ContentTypeHeader(Header, MediaType):
-
 	def __init__(self, body = None):
 		Header.__init__(self, 'Content-Type' , body)
-		MediaType.__init__(self)
+		MediaType.__init__(self, body)
 
 	def __str__(self):
 		result = self.getName() + ': ' + MediaType.__str__(self)
@@ -892,7 +935,7 @@ class ExpiresHeader(Header):
 	"""The Expires header field gives the relative time after which the message (or content)
 	expires.
 
-i	The precise meaning of this is method dependent. The expiration time in an INVITE
+	The precise meaning of this is method dependent. The expiration time in an INVITE
 	does not affect the duration of the actual session that may result from the invitation.
 	Session description protocols may offer the ability to express time limits on the session
 	duration, however. The value of this field is an integral number of seconds (in decimal)
@@ -916,7 +959,7 @@ i	The precise meaning of this is method dependent. The expiration time in an INV
 
 	Example:
 	Expires: 5
-"""
+	"""
 	
 	def __init__(self, body = None):
 		Header.__init__(self, 'Expires' , body)
@@ -978,7 +1021,6 @@ class MaxForwardsHeader(Header):
 		return result
 
 class SipCSeqHeader(Header):
-	
 	def __init__(self, body = None):
 		Header.__init__(self, 'CSeq' , body)
 
@@ -1014,23 +1056,20 @@ class SipCSeqHeader(Header):
 		result += str(self._seqNumber) + ' ' + self._method
 		return result
 
-
 class SipToHeader(SipAddressHeader):
-
-	PARAM_TAG = 'tag'
-
 	def __init__(self, body = None):
 		SipAddressHeader.__init__(self, 'To' , body)
 
 	def getTag(self):
-		return self[SipToHeader.PARAM_TAG] if SipToHeader.PARAM_TAG in self else None
+		return self.get(Header.PARAM_TAG)
 
 	def setTag(self, tag):
-		self.setParameter(SipToHeader.PARAM_TAG, tag)
-
+		if tag is None:
+			self.pop(Header.PARAM_TAG)
+		else:
+			self[Header.PARAM_TAG] = tag
 
 class SipViaHeader(Header, dict):
-
 	PARAM_BRANCH = 'branch'
 	PARAM_HOST = 'host'
 	PARAM_MADDR = 'maddr'
@@ -1084,11 +1123,14 @@ class SipViaHeader(Header, dict):
 
 	def getBranch(self):
 		"""Gets the branch paramater of the SipViaHeader."""
-		return self[SipViaHeader.PARAM_BRANCH] if SipViaHeader.PARAM_BRANCH in self else None
+		return self.get(SipViaHeader.PARAM_BRANCH)
 
 	def setBranch(self, branch):
 		"""Sets the branch parameter of the SipViaHeader to the newly supplied branch value."""
-		self[Header.PARAM_BRANCH] = branch
+		if branch is None:
+			self.pop(Header.PARAM_BRANCH)
+		else:
+			self[Header.PARAM_BRANCH] = branch
 
 	def getHost(self):
 		"""Returns the host part of this SipViaHeader."""
@@ -1214,8 +1256,6 @@ class ProxyAuthenticateHeader(WwwAuthenticateHeader):
 ###### sip messsage parser ############################################################
 
 class SipParser(object):
-
-
 	@staticmethod
 	def parseListHeader(value):
 		"""Parse lists as described by RFC 2068 Section 2.
@@ -1366,8 +1406,8 @@ class SipParser(object):
 		return result
 
 class HeaderFactory(object):
-
 	HEADER_NAMES = {
+		'authentication-info' : AuthenticationInfoHeader,
 		'from' : SipFromHeader,
 		'contact': ContactHeader,
 		'content-type': ContentTypeHeader,
@@ -1377,6 +1417,7 @@ class HeaderFactory(object):
 		'to' : SipToHeader,
 		'via' : SipViaHeader,
 		'www-authenticate' : WwwAuthenticateHeader,
+		'proxy-authenticate' : ProxyAuthenticateHeader,
 		'authorization' : AuthorizationHeader}
 
 	COMPACT_FORMS = {
@@ -1419,21 +1460,9 @@ class HeaderFactory(object):
 			result.setTag(tag)
 		return result
 
-	def createAuthorizationHeader(self, scheme):
-		"""Creates a new ToHeader based on the newly supplied address and tag values."""
-		result = AuthorizationHeader()
-		result.setScheme(scheme)
-		return result
-
-
-
-
-
 ###### sip messsage ############################################################
 
-
 class SipMessage(object):
-  
 	def __init__(self):
 		self.__headers = []
 		self.__content = None
@@ -1523,7 +1552,6 @@ class SipMessage(object):
 	def getRouteHeaders(self):
 		return []
 
-
 	def getTransactionId(self):
 		"""Generate (compute) a transaction ID unique for this SIP message.
 
@@ -1582,6 +1610,13 @@ class SipMessage(object):
 		
 		return result.lower().replace(':', '-').replace('@', '-') + '-' + SipUtils.generateSignature()
 
+	def getCallId(self):
+		"""Get call id from appropriate header. Return None if header doesn't exist"""
+		result = None
+		callIdHeader = self.getHeaderByType(SipCallIdHeader)
+		if not callIdHeader is None:
+			result = callIdHeader.getCallId() 
+		return result
 
 class SipRequest(SipMessage):
 	"""Sip Request"""
@@ -1696,7 +1731,8 @@ class SipResponse(SipMessage):
 		return 'SIP/2.0 ' + str(self._statusCode) + ' ' + str(self._reasonPhrase)
 
 class MessageFactory(object):
-  
+
+	@staticmethod
 	def createRequest(requestUri = None, method = None):
 		"""Creates a new Request message"""
 		result = SipRequest()
@@ -1706,7 +1742,8 @@ class MessageFactory(object):
 			result.setMethod(method)
 		return result
 
-	def createResponse(self, statusCode, request):
+	@staticmethod
+	def createResponse(statusCode, request):
 		"""Creates a new Response message of type specified by the statusCode paramater, based on a specific Request message."""
 		response = SipResponse()
 		response.setStatusCode(statusCode)
@@ -1716,11 +1753,161 @@ class MessageFactory(object):
 				response.addHeader(header)
 		return response
 
+	@staticmethod
+	def createRequestRegister(user, hop):
+		requestUri = SipUri('sip:%s' % user.getSipDomain())
+		userUri = SipUri('sip:%s@%s' % (user.getUserName(), user.getSipDomain()))
+		userSipAddress = SipAddress()
+		userSipAddress.setUri(userUri)
+		userSipAddress.setDisplayName(user.getDisplayName())
+
+		result = SipRequest()
+		result.setMethod(SipRequest.METHOD_REGISTER)
+		result.setRequestUri(requestUri)
+
+		fromHeader = SipFromHeader()
+		fromHeader.setAddress(userSipAddress)
+		fromHeader.setTag(SipUtils.generateTag())
+		result.addHeader(fromHeader)
+		toHeader = SipToHeader()
+		toHeader.setAddress(userSipAddress)
+		result.addHeader(toHeader)
+
+		result.addHeader(SipCallIdHeader(SipUtils.generateCallIdentifier(hop.getHost())))
+
+		result.addHeader(SipCSeqHeader('1 REGISTER'))
+		viaHeader = SipViaHeader('SIP/2.0/UDP some.host')
+		viaHeader.setBranch(SipUtils.generateBranchId());
+		result.addHeader(viaHeader)
+		result.addHeader(MaxForwardsHeader('70'))
+		result.addHeader(ExpiresHeader('3600'))
+
+		contactUri = SipUri()
+		contactUri.setScheme(Uri.SCHEME_SIP)
+		contactUri.setHost(hop.getHost());
+		contactUri.setPort(hop.getPort());
+		contactHeader = ContactHeader()
+		contactHeader.setAddress(contactUri)
+		result.addHeader(contactHeader);
+
+		# create authorization header
+		authorizationHeader = AuthorizationHeader()
+		authorizationHeader.setScheme('Digest')
+		authorizationHeader.setUserName(user.getAuthUserName())
+		authorizationHeader.setRealm(user.getSipDomain())
+		authorizationHeader.setUri(str(requestUri))
+		authorizationHeader.setNonce('')
+		authorizationHeader.setResponse('')
+		result.addHeader(authorizationHeader)
+		
+		return result
+
+	@staticmethod
+	def createRequestDeRegister(request):
+		result = copy.deepcopy(request)
+
+		expiresHeader = result.getHeaderByType(ExpiresHeader)
+		expiresHeader.setExpires(0)			
+
+		# Increment cseq
+		cSeq = result.getHeaderByType(SipCSeqHeader)
+               	cSeq.setSeqNumber(cSeq.getSeqNumber() + 2)
+
+		# remove transaction related stuff
+		fromHeader = result.getHeaderByType(SipFromHeader)
+		if not fromHeader is None:
+			fromHeader.setTag(SipUtils.generateTag())
+
+		topmostViaHeader = result.getTopmostViaHeader()
+		if not topmostViaHeader is None:
+			topmostViaHeader.setBranch(None);
+
+		return result
+
+	@staticmethod
+	def createRequestInvite(user1, user2, hop):
+
+		if not isinstance(user1, SipAddress) or not isinstance(user2, SipAddress):
+			raise ESipMessageException("Invalid argument format")
+		
+		user1Uri = user1.getUri()
+		user1SipAddress = SipAddress()
+		user1SipAddress.setUri(user1Uri)
+		user1SipAddress.setDisplayName(user1.getDisplayName())
+
+		user2Uri = user2.getUri()
+		user2SipAddress = SipAddress()
+		user2SipAddress.setUri(user2Uri)
+		user2SipAddress.setDisplayName(user2.getDisplayName())
+
+		result = SipRequest()
+		result.setMethod(SipRequest.METHOD_INVITE)
+		result.setRequestUri(user2Uri)
+
+		fromHeader = SipFromHeader()
+		fromHeader.setAddress(user1SipAddress)
+		fromHeader.setTag(SipUtils.generateTag())
+		result.addHeader(fromHeader)
+		toHeader = SipToHeader()
+		toHeader.setAddress(user2SipAddress)
+		result.addHeader(toHeader)
+
+		result.addHeader(SipCallIdHeader(SipUtils.generateCallIdentifier(hop.getHost())))
+
+		result.addHeader(SipCSeqHeader('1 INVITE'))
+		viaHeader = SipViaHeader('SIP/2.0/UDP some.host')
+		viaHeader.setBranch(SipUtils.generateBranchId());
+		result.addHeader(viaHeader)
+		result.addHeader(MaxForwardsHeader('70'))
+
+		contactUri = SipUri()
+		contactUri.setScheme(Uri.SCHEME_SIP)
+		contactUri.setHost(hop.getHost());
+		contactUri.setPort(hop.getPort());
+		contactHeader = ContactHeader()
+		contactHeader.setAddress(contactUri)
+		result.addHeader(contactHeader);
+
+		# create authorization header
+		#authorizationHeader = AuthorizationHeader()
+		#authorizationHeader.setScheme('Digest')
+		#authorizationHeader.setUserName(user1.getAuthUserName())
+		#authorizationHeader.setRealm(user1.getSipDomain())
+		#authorizationHeader.setUri(str(user1Uri))
+		#authorizationHeader.setNonce('')
+		#authorizationHeader.setResponse('')
+		#result.addHeader(authorizationHeader)
+
+		result.setContent("v=0\no=UserA 2890844526 2890844526 IN IP4 anfdata.cz\ns=Session SDP\nc=IN IP4 100.101.102.103\nt=0 0\nm=audio 49170 RTP/AVP 0\na=rtpmap:0 PCMU/8000")
+
+		result.addHeader(ContentLengthHeader(len(result.getContent())))
+		result.addHeader(ContentTypeHeader("application/sdp"))
+		return result
+
+	@staticmethod
+	def createRequestAck(inviteRequest):
+		result = MessageFactory.createRequest(copy.deepcopy(inviteRequest.getRequestUri()), SipRequest.METHOD_ACK)
+
+		result.addHeader(copy.deepcopy(inviteRequest.getHeaderByType(SipFromHeader)))
+		result.addHeader(copy.deepcopy(inviteRequest.getHeaderByType(SipToHeader)))
+		result.addHeader(copy.deepcopy(inviteRequest.getHeaderByType(SipCallIdHeader)))
+		maxForwards = inviteRequest.getHeaderByType(MaxForwardsHeader)
+		if not maxForwards is None:
+			result.addHeader(copy.deepcopy(maxForwards))
+
+		topVia = inviteRequest.getTopmostViaHeader()
+		if not topVia is None:
+			result.addHeader(copy.deepcopy(topVia))
+			
+		# change cseq method, number must stay untouched 
+		cSeqHeader = copy.deepcopy(inviteRequest.getHeaderByType(SipCSeqHeader))
+               	cSeqHeader.setMethod(result.getMethod())
+		result.addHeader(cSeqHeader)
+		return result
 
 ##### unit test cases #########################################################################
 
 class UnitTestCase(unittest.TestCase):
-
 	def setUp(self):
 		self.CONTENT = 'MyContent'
 		self.USR_BOB_USERNAME =  'bob'
@@ -1776,6 +1963,11 @@ class UnitTestCase(unittest.TestCase):
 		m.addHeader(tv)
 		m.getTransactionId()
 
+	def testMediaType(self):
+		MT = "application/sdp"
+		mt = MediaType(MT)
+		self.assertEqual(str(mt), MT)
+
 	def testAddressHeader(self):
 		header = 'From: ' + self.USR_BOB_ADDR
 
@@ -1786,6 +1978,15 @@ class UnitTestCase(unittest.TestCase):
 
 		h = SipAddressHeader('From', self.USR_BOB_ADDR)
 		self.assertEqual(str(h), header)
+
+	def testAuthenticationInfoHeader(self):
+		h = AuthenticationInfoHeader()
+		h.setNextNonce('xnoncex')
+		self.assertEqual(h.getNextNonce(), 'xnoncex')
+		str(h)
+		h = AuthenticationInfoHeader('nextnonce="xxx"')
+		self.assertEqual(h.getNextNonce(), 'xxx')
+		str(h)
 
 	def testAuthenticationHeader(self):
 		h = AuthenticationHeader('test')
@@ -1802,6 +2003,10 @@ class UnitTestCase(unittest.TestCase):
 		h = AuthorizationHeader()
 		h.setScheme('Digest')
 		h.setNC(34)
+		str(h)
+
+	def testContentTypeHeader(self):
+		h = ContentTypeHeader("application/sdp")
 		str(h)
 
 	def testViaHeader(self):
@@ -1830,7 +2035,32 @@ class UnitTestCase(unittest.TestCase):
 		SipUtils.generateTag()
 		SipUtils.generateBranchId()
 
+	def testMessageFactory(self):
 
+		user1 = SipAddress()
+		user1Uri = SipUri()
+		user1Uri.setScheme(Uri.SCHEME_SIP)
+		user1Uri.setUser("ITSY000001")
+		user1Uri.setHost("brn10.iit.ims")
+		user1.setDisplayName('ITSY000001')
+		user1.setUri(user1Uri)
+
+		user2 = SipAddress()
+		user2Uri = SipUri()
+		user2Uri.setScheme(Uri.SCHEME_SIP)
+		user2Uri.setUser("ITSY000002")
+		user2Uri.setHost("brn10.iit.ims")
+		user2.setDisplayName('ITSY000002')
+		user2.setUri(user2Uri)
+
+		localHop = Hop()
+		localHop.setHost('127.0.0.1')
+		localHop.setPort(5060)
+
+		inv = MessageFactory.createRequestInvite(user1, user2, localHop)
+
+		ack = MessageFactory.createRequestAck(inv)
+ 
 	def testSipMessageParser(self):
 		f = open('data/sip_options.txt', 'rb')
 		msg = f.read()
@@ -1849,8 +2079,6 @@ class UnitTestCase(unittest.TestCase):
 		f.close()
 		sipParser = SipParser()
 		sipParser.parseSIPMessage(msg) 
-
-
 	
 def suite():
 	suite = unittest.TestLoader().loadTestsFromTestCase(UnitTestCase)
