@@ -207,6 +207,7 @@ class SipListeningPoint(IpProcessor):
 	def onData(self, data):
 		logger = logging.getLogger(self.LOGGER_NAME)
 		logger.debug('onData() Enter data length: %d', len(data))
+		
 
 		# try to parse incoming data
 		sipParser = sipmessage.SipParser()
@@ -219,6 +220,7 @@ class SipListeningPoint(IpProcessor):
 		self._sipStack.processMessageReceive(msg)
 
 		event = None
+		blockListeners = False
 
 		createTransactions = self._sipStack[SipStack.PARAM_CREATE_TRANSACTIONS]
 		if createTransactions is None:
@@ -266,10 +268,7 @@ class SipListeningPoint(IpProcessor):
 
 			#  modify transaction state according to state machine and response code
 			if not clientTransaction is None:
-				if msg.getStatusCode() >= 200 and msg.getStatusCode() <= 699:
-					clientTransaction.setState(SipTransaction.TRANSACTION_STATE_COMPLETED)
-				elif msg.getStatusCode() >= 100 and msg.getStatusCode() <= 199:
-					clientTransaction.setState(SipTransaction.TRANSACTION_STATE_PROCEEDING)
+				blockListeners = blockListeners or clientTransaction.processResponse(msg)
 
 			# identify (match) dialog
 			dialog = None
@@ -278,7 +277,7 @@ class SipListeningPoint(IpProcessor):
 			event = SipResponseEvent(self, msg, clientTransaction, dialog)
 
 		# allow message preprocessing
-		blockListeners = self._sipStack.preprocessSipEvent(event)
+		blockListeners = blockListeners or self._sipStack.preprocessSipEvent(event)
 
 		# notify listeners
 		if not blockListeners:
@@ -1292,29 +1291,22 @@ class SipClientTransaction(SipTransaction):
 	def __init__(self, sipStack, request):
 		SipTransaction.__init__(self, sipStack, request)
 
-	def createAck(self):
+	def sendAck(self):
 		"""Creates a new Ack message from the Request associated with this client transaction."""
 
 		logger = logging.getLogger(self.LOGGER_NAME)
-		logger.debug('createAck() Enter')
+		logger.debug('sendAck() Enter')
 
-		#if changing state to completed, send ACK
-		create Ack
+		ackRequest = MessageFactory.createRequestAck(self.getOriginalRequest())
+		self._sipStack.sendRequest(ackRequest)
 
-		slef.sendMessage(ackRequest)
-
-		# parent method
-		SipTransaction.setState(self, state)
-
-		logger.debug('createAck() Leave')
-
-		raise ENotImplemented()
+		logger.debug('sendAck() Leave')
 
 	def createCancel(self):
 		"""Creates a new Cancel message from the Request associated with this client transaction."""
 		raise ENotImplemented()
 
-	def sendRequest(self):
+	def sendRequest(self, request = None):
 		"""Sends the Request which created this ClientTransaction.
 
 		When an application wishes to send a Request message,
@@ -1328,12 +1320,12 @@ class SipClientTransaction(SipTransaction):
 		"""
 
 		logger = logging.getLogger(self.LOGGER_NAME)
-		logger.debug('sendRequest()')
+		logger.debug('sendRequest() Enter')
 
-		if not self.getState() is None:
-			raise ESipStackInvalidState('Request already sent')
+		#if not self.getState() is None:
+		#	raise ESipStackInvalidState('Request already sent')
 
-		request = self.getOriginalRequest()
+		request = request if not request is None else self.getOriginalRequest()
 
 		# set the branch id for the top via header.
 		topVia = request.getTopmostViaHeader()
@@ -1346,12 +1338,14 @@ class SipClientTransaction(SipTransaction):
 			if request.getMethod() == SipRequest.METHOD_ACK:
 
 				# send directly to the underlying transport and close this transaction
-				if self.isReliable():
-					self.setState(SipTransaction.TRANSACTION_STATE_TERMINATED)
-				else:
-					self.setState(SipTransaction.TRANSACTION_STATE_COMPLETED)
+				#if self.isReliable():
+				self.setState(SipTransaction.TRANSACTION_STATE_TERMINATED)
+				self._sipStack.sendRequest(request);
 
-				self.cleanUpOnTimer()
+				#else:
+				#	self.setState(SipTransaction.TRANSACTION_STATE_COMPLETED)
+
+				#self.cleanUpOnTimer()
 			else:
 				self.sipStack.sendRequest(request);
 
@@ -1378,19 +1372,57 @@ class SipClientTransaction(SipTransaction):
 			
 			self._sipStack.sendRequest(request);
 
-	def setState(self, state):
-		"""Sets new state of the transaction"""
+		logger.debug('sendRequest() Leave')
+
+	def processResponse(self, response):
 
 		logger = logging.getLogger(self.LOGGER_NAME)
+		logger.debug('processResponse() Enter in state %s' % self.getState())
 
-		#if changing state to completed, send ACK
-		create Ack
+		blockListeners = False 
 
-		slef.sendMessage(ackRequest)
+		state = self.getState()
+		invTransaction = self.getOriginalRequest().getMethod() == SipRequest.METHOD_INVITE
 
-		# parent method
-		SipTransaction.setState(self, state)
+		# 100 - 199 handle provisioning response
+		if response.getStatusCode() >= 100 and response.getStatusCode() <= 199:
+			if state in [SipTransaction.TRANSACTION_STATE_CALLING, SipTransaction.TRANSACTION_STATE_TRYING, SipTransaction.TRANSACTION_STATE_PROCEEDING]:
+				self.setState(SipTransaction.TRANSACTION_STATE_PROCEEDING)
+			else:
+				blockListeners = True 
 
+		# 200 - 299 handle ok response
+		elif response.getStatusCode() >= 200 and response.getStatusCode() <= 299:
+			if invTransaction: 
+				if state in [SipTransaction.TRANSACTION_STATE_CALLING, SipTransaction.TRANSACTION_STATE_PROCEEDING]:
+					self.setState(SipTransaction.TRANSACTION_STATE_TERMINATED)
+				else:
+					blockListeners = True 
+
+			else:
+				if state in [SipTransaction.TRANSACTION_STATE_TRYING, SipTransaction.TRANSACTION_STATE_PROCEEDING]:
+					self.setState(SipTransaction.TRANSACTION_STATE_COMPLETED)
+				else:
+					blockListeners = True 
+
+		# 300 - 699 handle ok response
+		elif response.getStatusCode() >= 300 and response.getStatusCode() <= 699:
+			if invTransaction: 
+				self.sendAck()
+			if state in [SipTransaction.TRANSACTION_STATE_CALLING, SipTransaction.TRANSACTION_STATE_TRYING, SipTransaction.TRANSACTION_STATE_PROCEEDING]:
+				self.setState(SipTransaction.TRANSACTION_STATE_COMPLETED)
+			else:
+				blockListeners = True 
+		else:
+			blockListeners = True 
+
+
+		if blockListeners:
+			logger.debug('discarding message %s %s', respnse.getStatusCode(), getReasonPhrase())
+
+		logger.debug('processResponse() Leave')
+
+		return blockListeners 
 
 class SipServerTransaction(SipTransaction):
 	"""Receives Request and sends Response back to client
@@ -1517,7 +1549,6 @@ class SipServerTransaction(SipTransaction):
 		#else:
 
 		#via = response.getTopmostViaHeader()
-		#print via
 		#transport = via.getTransport()
 		#		if transport is None:
 		#			raise ESipStackException('missing transport!')
@@ -1820,7 +1851,6 @@ class MessageDigestAlgorithm(object):
 		request_digest = None;
 
 		if not cnonce_value is None and not qop_value is None and not nc_value is None and qop_value.strip().lower() in ['auth', 'auth-int']:
-
 			request_digest = MessageDigestAlgorithm.KD(hashUserNameRealmPasswd, str(nonce_value) + ':' + str(nc_value) + ':' + str(cnonce_value) + ':' + str(qop_value) + ':' + MessageDigestAlgorithm.H(A2));
 		else:
 			request_digest = MessageDigestAlgorithm.KD(hashUserNameRealmPasswd, str(nonce_value) + ':' + MessageDigestAlgorithm.H(A2))
