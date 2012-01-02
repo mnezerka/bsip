@@ -1642,7 +1642,7 @@ class DigestAuthenticator(SipInterceptor):
 		# take decision what kind of "quality of protection will be used"
 		# authHeader.getQop() is a quoted _list_ of qop values(e.g. "auth,auth-int") Client is supposed to pick one
 		qopList = authHeader.getQop()
-		qop = 'auth' 
+		qop = 'auth'
 		qopPreferenceValue = self.QOP_PREFERENCE_LIST[qop]
 		if not qopList is None:
 			qopTypes = qopList.split(',')
@@ -1652,7 +1652,8 @@ class DigestAuthenticator(SipInterceptor):
 					if self.QOP_PREFERENCE_LIST[qopType.strip()] > qopPreferenceValue:
 						qopPreferenceValue = self.QOP_PREFERENCE_LIST[qopType.strip()]
 						qop = qopType.strip() 
-
+		else:
+			qop = None
 		logger.debug('getAuthorization() selected qop is: %s', qop)
 
 		# create new authorization record
@@ -1670,6 +1671,11 @@ class DigestAuthenticator(SipInterceptor):
 			"method": request.getMethod(),
 			Header.PARAM_CNONCE: "xyz",
 			"classname": ProxyAuthorizationHeader if isinstance(authHeader, ProxyAuthenticateHeader) else AuthorizationHeader})
+
+
+		request.removeHeadersByType(ProxyAuthorizationHeader if isinstance(authHeader, ProxyAuthenticateHeader) else AuthorizationHeader)
+		authorizationHeader = self.createDigestAuthorizationHeader(authParams, response)
+		request.addHeader(authorizationHeader)
 
 		# store record to cache
 		cacheId = "%s@%s" % (fromUri.getUser(), fromUri.getHost())
