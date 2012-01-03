@@ -217,10 +217,9 @@ class SipListeningPoint(IpProcessor):
 			logger.debug('ESipStackException when parsing message')
 			return
 
-		self._sipStack.processMessageReceive(msg)
+		blockListeners = self._sipStack.processMessageReceive(msg)
 
 		event = None
-		blockListeners = False
 
 		createTransactions = self._sipStack[SipStack.PARAM_CREATE_TRANSACTIONS]
 		if createTransactions is None:
@@ -700,6 +699,7 @@ class SipStack(dict):
 		self._serverTransactions = {} 
 		self._sipListeners = []
 		self._sipInterceptors = []
+		self._calls = dict()
 
 		# process properties
 		if properties is None or not type(properties).__name__ == 'dict':
@@ -715,6 +715,11 @@ class SipStack(dict):
 
 		# create ip dispatcher
 		self._ipDispatcher = IpDispatcher()
+
+	def getCallSeq(self, callId):
+		if callId not in self._calls:
+			self._calls[callId] = 1
+		return self._calls[callId]		
 
 	def getSipListeners(self):
 		return self._sipListeners
@@ -991,7 +996,8 @@ class SipStack(dict):
 
 		logger = logging.getLogger(self.LOGGER_NAME)
 		tranId = response.getTransactionId()
-		logger.debug('getClientTransactionForResponse() looking for client transaction identified by %s' % tranId)
+		logger.debug('getClientTransactionForResponse() looking for client transaction identified by %s, result is %s' %
+			(tranId, "found" if tranId in self._clientTransactions else "not found" ))
 		return self._clientTransactions[tranId] if tranId in self._clientTransactions else None
 
 	def createClientTransaction(self, request):
@@ -1609,16 +1615,24 @@ class DigestAuthenticator(SipInterceptor):
 		self._accountManager = accountManager
 
 	def handleChallenge(self, response, originalRequest):
-		""" Server sent a challenge and waits for same request with authorization header"""
+		"""Generate new request containing authorization for response with challenge sent by server"""
 
 		logger = logging.getLogger(self.LOGGER_NAME)
 		logger.debug('handleChallenge() Enter')
 
-		authHeader = response.getHeaderByType(WwwAuthenticateHeader)
-		if authHeader is None:
+		request = None
+
+		if response.getStatusCode() == SipResponse.RESPONSE_UNAUTHORIZED: 
+			authHeader = response.getHeaderByType(WwwAuthenticateHeader)
+			if authHeader is None:
+				raise ESipStackException('Could not find WWWAuthenticate header');
+		elif response.getStatusCode() == SipResponse.RESPONSE_PROXY_AUTHENTICATION_REQUIRED: 
 			authHeader = response.getHeaderByType(ProxyAuthenticateHeader)
-		if authHeader is None:
-			raise ESipStackException('Could not find WWWAuthenticate or ProxyAuthenticate header');
+			if authHeader is None:
+				raise ESipStackException('Could not find WWWAuthenticate header');
+		else:
+			logger.debug('handleChallenge() Leave - unknown response %d, nothing to do' % response.getStatusCode())
+			return request 
 
 		# create new request instance
 		request = copy.deepcopy(originalRequest)
@@ -1639,6 +1653,8 @@ class DigestAuthenticator(SipInterceptor):
 		topVia = request.getTopmostViaHeader()
 		topVia.setBranch(SipUtils.generateBranchId())
 
+		logger.debug('processing auth header %s (realm: %s)' % (authHeader.__class__.__name__, authHeader.getRealm()))
+
 		# take decision what kind of "quality of protection will be used"
 		# authHeader.getQop() is a quoted _list_ of qop values(e.g. "auth,auth-int") Client is supposed to pick one
 		qopList = authHeader.getQop()
@@ -1654,13 +1670,11 @@ class DigestAuthenticator(SipInterceptor):
 						qop = qopType.strip() 
 		else:
 			qop = None
-		logger.debug('getAuthorization() selected qop is: %s', qop)
+		logger.debug('selected qop is: %s', qop)
 
 		# create new authorization record
 		authParams = dict({
-			"user": user.getUserName(),
-			"authusername": user.getAuthUserName(),
-			"userauthhash": user.getHashUserDomainPassword(),
+			"user": user,
 			Header.PARAM_QOP: qop,
 			Header.PARAM_ALGORITHM: authHeader.getAlgorithm(),
 			Header.PARAM_REALM: authHeader.getRealm(),
@@ -1669,82 +1683,138 @@ class DigestAuthenticator(SipInterceptor):
 			Header.PARAM_OPAQUE: authHeader.getOpaque(),
 			Header.PARAM_URI: str(request.getRequestUri()),
 			"method": request.getMethod(),
-			Header.PARAM_CNONCE: "xyz",
-			"classname": ProxyAuthorizationHeader if isinstance(authHeader, ProxyAuthenticateHeader) else AuthorizationHeader})
+			Header.PARAM_CNONCE: "xyz"})
 
+		# update existing authorization header or create new one
+		relatedAuthorizationHeader = None
+		if isinstance(authHeader, WwwAuthenticateHeader):
+			authorizationHeaders = request.getHeadersByType(AuthorizationHeader)
+			for authorizationHeader in authorizationHeaders:
+				if authorizationHeader.getRealm() == authHeader.getRealm():
+					relatedAuthorizationHeader = authorizationHeader
+					break
+			if relatedAuthorizationHeader is None:
+				relatedAuthorizationHeader = AuthorizationHeader()
+				request.addHeader(relatedAuthorizationHeader)
+				relatedAuthorizationHeader.setScheme('Digest')
+				relatedAuthorizationHeader.setRealm(authHeader.getRealm())
 
-		request.removeHeadersByType(ProxyAuthorizationHeader if isinstance(authHeader, ProxyAuthenticateHeader) else AuthorizationHeader)
-		authorizationHeader = self.createDigestAuthorizationHeader(authParams, response)
-		request.addHeader(authorizationHeader)
+		elif isinstance(authHeader, ProxyAuthenticateHeader):
+			authorizationHeaders = request.getHeadersByType(ProxyAuthorizationHeader)
+			for authorizationHeader in authorizationHeaders:
+				if authorizationHeader.getRealm() == authHeader.getRealm():
+					relatedAuthorizationHeader = authorizationHeader
+					break
+			if relatedAuthorizationHeader is None:
+				relatedAuthorizationHeader = ProxyAuthorizationHeader()
+				request.addHeader(relatedAuthorizationHeader)
+				relatedAuthorizationHeader.setScheme('Digest')
+				relatedAuthorizationHeader.setRealm(authHeader.getRealm())
+
+		logger.debug('after header manipulation')
 
 		# store record to cache
-		cacheId = "%s@%s" % (fromUri.getUser(), fromUri.getHost())
+		#cacheId = "%s@%s" % (fromUri.getUser(), fromUri.getHost())
+		cacheId = request.getCallId()
 		if not cacheId in self._cachedCredentials:
 			self._cachedCredentials[cacheId] = dict()
 		self._cachedCredentials[cacheId][authParams[Header.PARAM_REALM]] = authParams
+		self._cachedCredentials[cacheId]['last'] = authParams
 
 		logger.debug('handleChallenge() Leave')
 		return request
 
-	def createDigestAuthorizationHeader(self, authParams, response):
-		"""Helper function for construction authorization header with correct set of parameters"""
-		logger = logging.getLogger(self.LOGGER_NAME)
-		logger.debug('createAuthorizationHeader() Enter')
+#	def createAuthorizationHeader(self, authParams, response):
+#		"""Helper function for construction authorization header with correct set of parameters"""
+#		logger = logging.getLogger(self.LOGGER_NAME)
+#		logger.debug('createAuthorizationHeader() Enter')
+#
+#		result = authParams["class"]()
+#		result.setScheme('Digest')
+#		result.setUserName(authParams["authusername"])
+#		result.setRealm(authParams[Header.PARAM_REALM])
+#		result.setNonce(authParams[Header.PARAM_NONCE])
+#		result.setUri(authParams[Header.PARAM_URI])
+#		result.setResponse(response)
+#			
+#		if not authParams[Header.PARAM_ALGORITHM] is None:
+#			result.setAlgorithm(authParams[Header.PARAM_ALGORITHM])
+#
+#		if not authParams[Header.PARAM_OPAQUE] is None:
+#			result.setOpaque(authParams[Header.PARAM_OPAQUE])
+#
+#		if not authParams[Header.PARAM_QOP] is None:
+#			result.setQop(authParams[Header.PARAM_QOP])
+#			result.setNC(authParams[Header.PARAM_NC])
+#			result.setCNonce(authParams[Header.PARAM_CNONCE])
+#
+#		result.setResponse(response)
+#		logger.debug('createAuthorizationHeader() Leave')
+#        	return result 
 
-		result = authParams["classname"]()
-		result.setScheme('Digest')
-		result.setUserName(authParams["authusername"])
-		result.setRealm(authParams[Header.PARAM_REALM])
-		result.setNonce(authParams[Header.PARAM_NONCE])
-		result.setUri(authParams[Header.PARAM_URI])
-		result.setResponse(response)
+	def updateAuthorizationHeader(self, authHeader, authParams, response):
+		"""Helper function that upldates authorization header from provided set of auth parameters"""
+		logger = logging.getLogger(self.LOGGER_NAME)
+		logger.debug('updateAuthorizationHeader() Enter')
+
+		user = authParams["user"]
+
+		authHeader.setScheme('Digest')
+		authHeader.setUserName(user.getAuthUserName())
+		authHeader.setRealm(authParams[Header.PARAM_REALM])
+		authHeader.setNonce(authParams[Header.PARAM_NONCE])
+		authHeader.setUri(authParams[Header.PARAM_URI])
+		authHeader.setResponse(response)
 			
 		if not authParams[Header.PARAM_ALGORITHM] is None:
-			result.setAlgorithm(authParams[Header.PARAM_ALGORITHM])
+			authHeader.setAlgorithm(authParams[Header.PARAM_ALGORITHM])
 
 		if not authParams[Header.PARAM_OPAQUE] is None:
-			result.setOpaque(authParams[Header.PARAM_OPAQUE])
+			authHeader.setOpaque(authParams[Header.PARAM_OPAQUE])
 
 		if not authParams[Header.PARAM_QOP] is None:
-			result.setQop(authParams[Header.PARAM_QOP])
-			result.setNC(authParams[Header.PARAM_NC])
-			result.setCNonce(authParams[Header.PARAM_CNONCE])
+			authHeader.setQop(authParams[Header.PARAM_QOP])
+			authHeader.setNC(authParams[Header.PARAM_NC])
+			authHeader.setCNonce(authParams[Header.PARAM_CNONCE])
+		authHeader.setResponse(response)
+		logger.debug('updateAuthorizationHeader() Leave')
 
-		result.setResponse(response)
-		logger.debug('createAuthorizationHeader() Leave')
-        	return result 
-
-	def onEvent(self, event):
+	def onMessageReceive(self, msg):
+	#def onEvent(self, event):
 		logger = logging.getLogger(self.LOGGER_NAME)
-		logger.debug('onEvent() Enter')
+		logger.debug('onMessageReceive() Enter')
 
 		result = False
 
-		if isinstance(event, SipResponseEvent):
-			response = event.getResponse()
-			logger.debug("preprocessing response: %d %s" % (response.getStatusCode(),  response.getReasonPhrase()))
-			tran = event.getClientTransaction()
+		if isinstance(msg, sipmessage.SipResponse):
+
+			# identify (match) client transaction
+			tran = self._sipStack.getClientTransactionForResponse(msg)
+
+			logger.debug("preprocessing response: %d %s" % (msg.getStatusCode(),  msg.getReasonPhrase()))
 			if tran is None:
 				logger.debug("leaving, client transaction not available")
 				return
 
-			if response.getStatusCode() == 401 or response.getStatusCode() == 407:
-				request = self.handleChallenge(response, tran.getOriginalRequest())
+			if msg.getStatusCode() in [SipResponse.RESPONSE_UNAUTHORIZED, SipResponse.RESPONSE_PROXY_AUTHENTICATION_REQUIRED]:
+				request = self.handleChallenge(msg, tran.getOriginalRequest())
 				tran = self._sipStack.createClientTransaction(request)
 				logger.debug("creating authentication transaction, response will not be delivered to application")
 				tran.sendRequest()
 				result = True
 			else:
-				authInfoHeader = response.getHeaderByType(AuthenticationInfoHeader)
+				authInfoHeader = msg.getHeaderByType(AuthenticationInfoHeader)
 				# TODO update cache 
-				#callId = response.getCallId() 
-				#if not authInfoHeader is None and not callId is None:
-				#	nextNonce = authInfoHeader.getNextNonce()
-				#	if callId in self._cachedCredentials:
-				#		logger.debug("updating old nonce stored for call-id %s read from authentication-info header" % callId)
-				#		#self._cachedCredentials[callId]["nonce"] = nextNonce
+				callId = msg.getCallId()
+				if not authInfoHeader is None and not callId is None:
+					nextNonce = authInfoHeader.getNextNonce()
+					if callId in self._cachedCredentials:
+						if "last" in self._cachedCredentials[callId]:
+							logger.debug("updating old nonce stored for call-id %s read from authentication-info header" % callId)
+							self._cachedCredentials[callId]["last"][Header.PARAM_NONCE] = nextNonce
+							self._cachedCredentials[callId]["last"][Header.PARAM_NC] = 0 
 
-		logger.debug('onEvent() Leave')
+		logger.debug('onMessageReceive() Leave')
 
 		return result
 
@@ -1752,46 +1822,44 @@ class DigestAuthenticator(SipInterceptor):
 		logger = logging.getLogger(self.LOGGER_NAME)
 		logger.debug('onMessageSend() Enter')
 
-		fromHeader = msg.getHeaderByType(SipFromHeader)
-		fromUri = fromHeader.getAddress().getUri()
-		cacheId = "%s@%s" % (fromUri.getUser(), fromUri.getHost())
+		if not isinstance(msg, SipRequest):
+			return
+
+		#fromHeader = msg.getHeaderByType(SipFromHeader)
+		#fromUri = fromHeader.getAddress().getUri()
+		cacheId = msg.getCallId()
+		#cacheId = "%s@%s" % (fromUri.getUser(), fromUri.getHost())
 		if  cacheId in self._cachedCredentials:
 			logger.debug("found cache entry for cache id %s" % cacheId)
 			allRealmAuthParams = self._cachedCredentials[cacheId]
 
-			# look for realm
-			authorizationHeader = msg.getHeaderByType(AuthorizationHeader)	
-			realm = None
-			if not authorizationHeader is None:
-				# get realm from authorization header
-				realm = authorizationHeader.getRealm()
-			else:
-				# TODO:
-				# use first realm from user cache since no other information is available
-				for realm in allRealmAuthParams:
-					print realm 
-					break
+			authHeaders = msg.getHeadersByType(AuthorizationHeader) + msg.getHeadersByType(ProxyAuthorizationHeader)
+			for authHeader in authHeaders:
+				realm = authHeader.getRealm()
+				logger.debug("realm is %s" % realm)
+				if not realm is None and realm in allRealmAuthParams:
+					authParams = allRealmAuthParams[realm]
+					authParams[Header.PARAM_NC] = authParams[Header.PARAM_NC] + 1
+					
+					user = authParams["user"]
 
-			logger.debug("following realm will be used for authorization: %s" % realm)
+					response = MessageDigestAlgorithm.calculateResponse(
+						authParams[Header.PARAM_ALGORITHM],
+						user.getHashUserDomainPassword(),
+						authParams[Header.PARAM_NONCE],
+						authParams[Header.PARAM_NC],
+						authParams[Header.PARAM_CNONCE],
+						msg.getMethod(),
+						authParams[Header.PARAM_URI],
+						msg.getContent(),
+						authParams[Header.PARAM_QOP])
 
-			if not realm is None and realm in allRealmAuthParams:
-				authParams = allRealmAuthParams[realm]
-				authParams[Header.PARAM_NC] = authParams[Header.PARAM_NC] + 1
-				msg.removeHeadersByType(AuthorizationHeader)
 
-				response = MessageDigestAlgorithm.calculateResponse(
-					authParams[Header.PARAM_ALGORITHM],
-					authParams["userauthhash"],
-					authParams[Header.PARAM_NONCE],
-					authParams[Header.PARAM_NC],
-					authParams[Header.PARAM_CNONCE],
-					authParams["method"],
-					authParams[Header.PARAM_URI],
-					msg.getContent(),
-					authParams[Header.PARAM_QOP])
+					self.updateAuthorizationHeader(authHeader, authParams, response)
 
-				authorizationHeader = self.createDigestAuthorizationHeader(authParams, response)
-				msg.addHeader(authorizationHeader)
+				# look for realm
+				logger.debug("following realm will be used for authorization: %s" % realm)
+
 		logger.debug('onMessageSend() Leave')
 
 class MessageDigestAlgorithm(object):

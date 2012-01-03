@@ -7,24 +7,23 @@ from sipmessage import *
 from sipstack import SipStack, SipListeningPoint, SipListener, DigestAuthenticator
 from accountmanager import *
 
+SERVER_IP = '127.0.0.1'
+SERVER_PORT = 60001
+CLIENT_IP = SERVER_IP
+CLIENT_PORT = SERVER_PORT + 1
+
 CLIENT_IP = "64.9.169.27"
 CLEINT_PORT = 60001
 SERVER_IP = "22.10.31.72"
 SERVER_PORT = 5060
-
-SERVER_IP = '127.0.0.1'
-SERVER_PORT = 5060 
-CLIENT_IP = SERVER_IP
-CLIENT_PORT = SERVER_PORT + 1
-
 OUTBOUND_PROXY = SERVER_IP + ':' + str(SERVER_PORT)
 
 user1 = User()
-user1.setUserName('blue')
-user1.setDisplayName('blue')
-user1.setSipDomain('localhost')
-user1.setAuthUserName('blue')
-user1.setAuthPassword('bluesecret')
+user1.setUserName('ITSY000001')
+user1.setDisplayName('ITSY000001')
+user1.setSipDomain('brn10.iit.ims')
+user1.setAuthUserName('ITSY000001.priv@brn10.iit.ims')
+user1.setAuthPassword('31000000001')
 
 accounts = AccountManager()
 accounts.add(user1, True)
