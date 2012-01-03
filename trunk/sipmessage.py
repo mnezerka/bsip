@@ -1249,9 +1249,11 @@ class WwwAuthenticateHeader(AuthenticationHeader):
 	def __init__(self, body = None):
 		AuthenticationHeader.__init__(self, 'WWW-Authenticate', body)
 
-class ProxyAuthenticateHeader(WwwAuthenticateHeader):
+class ProxyAuthenticateHeader(AuthenticationHeader):
 	"""This class represents the Proxy-Authenticate response-header."""
-	pass	
+
+	def __init__(self, body = None):
+		AuthenticationHeader.__init__(self, 'Proxy-Authenticate', body)
 
 ###### sip messsage parser ############################################################
 
@@ -1486,6 +1488,9 @@ class SipMessage(object):
 	def addHeader(self, header):
 		self.__headers.append(header)
 
+	def removeHeader(self, header):
+		self.__headers.remove(header)
+
 	def getHeaders(self):
 		return self.__headers
 
@@ -1709,6 +1714,11 @@ class SipRequest(SipMessage):
 
 class SipResponse(SipMessage):
 	"""Sip Response"""
+
+	RESPONSE_TRYING = 100
+	RESPONSE_OK = 200
+	RESPONSE_UNAUTHORIZED = 401
+	RESPONSE_PROXY_AUTHENTICATION_REQUIRED = 407
   
 	def __init__(self):
 		SipMessage.__init__(self)

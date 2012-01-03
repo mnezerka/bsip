@@ -90,15 +90,12 @@ class SipClient(SipListener):
 
 	def processResponse(self, responseEvent):
 		response = responseEvent.getResponse()
-		print "incoming response - state:%s %d %s" % (self.state, response.getStatusCode(),  response.getReasonPhrase())
+		print "incoming response in %s state: %d %s" % (self.state, response.getStatusCode(),  response.getReasonPhrase())
 
 		if self.state == STATE_REGISTRATION:
-
 			if response.getStatusCode() == 200:
 				print "registration finished"
-
 				self.state = STATE_INVITE
-
 				#dereg = MessageFactory.createRequestRegister(user1, localHop)
 				invite = MessageFactory.createRequestInvite(user1Addr, user2Addr, localHop)
 				tran = self.stack.createClientTransaction(invite)
@@ -106,10 +103,18 @@ class SipClient(SipListener):
 				tran.sendRequest()
 
 		elif self.state == STATE_INVITE:
-
-			pass
+			print "invite finished"
+			if response.getStatusCode() > 200:
+				print "registration finished"
+				self.state = STATE_DEREGISTRATION
+				dereg = MessageFactory.createRequestDeRegister(self.registerRequest)
+				tran = self.stack.createClientTransaction(dereg)
+				print "sending deREGISTER"
+				tran.sendRequest()
+		
 		elif self.state == STATE_DEREGISTRATION:
-			print "incoming message in deregistration state"
+			if response.getStatusCode() == 200:
+				print "de-registration finished"
 		else:
 			print "unknown state"
 
