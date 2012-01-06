@@ -20,8 +20,6 @@ class Sip(object):
 
 	# cookie that should be used as a prefix for all branch hashes
 	BRANCH_MAGIC_COOKIE = 'z9hG4bK'
-
-
   
 	@staticmethod
 	def getMethodNames():
@@ -31,6 +29,7 @@ class Sip(object):
 
 	TRANSPORT_UDP = 'udp'
 	TRANSPORT_TCP = 'tcp'
+	TRANSPORT_SCTP = 'sctp'
 
 	URI_PREFIX_SIP = 'sip'
 	URI_PREFIX_SIPS = 'sips'
@@ -40,11 +39,8 @@ class Sip(object):
 		return [Sip.URI_PREFIX_SIP, Sip.URI_PREFIX_SIPS] 
 	
 	RESPONSE_TRYING = 100
-
 	RESPONSE_OK = 200
-
 	RESPONSE_UNAUTHORIZED = 401
-
 	RESPONSE_PROXY_AUTHENTICATION_REQUIRED = 407
 
 class SipUtils(object):
@@ -364,8 +360,8 @@ class SipAddress(object):
 	"""
 
 	def __init__(self, str = None):
-		self.__displayName = None
-		self.__uri = None
+		self._displayName = None
+		self._uri = None
 
 		if str is not None:
 
@@ -376,7 +372,7 @@ class SipAddress(object):
 				# display name cannot be empty
 				if len(parts[0]) > 0:
 					# remove "bad" characters from display name
-					self.__displayName = parts[0].replace('"', '').strip()
+					self._displayName = parts[0].replace('"', '').strip()
 					userAddr = parts[1]
 				else:
 					userAddr = parts[1]
@@ -387,58 +383,57 @@ class SipAddress(object):
 				userAddr = userAddr[:userAddr.find('>')] 
 
 			if userAddr.startswith('sip'):
-				self.__uri = SipUri(userAddr)
+				self._uri = SipUri(userAddr)
 			elif userAddr.startswith('tel'):
-				self.__uri = TelUri(userAddr)
+				self._uri = TelUri(userAddr)
 			else:
 				raise ESipMessageException
 					
 
 	def getDisplayName(self):
 		"""Gets the display name of this Address, or null if the attribute is not set."""
-		return self.__displayName
+		return self._displayName
 
 	def setDisplayName(self, displayName):
 		"""Sets the display name of the Address."""
-		self.__displayName = displayName
+		self._displayName = displayName
 
 	def getUri(self):
 		"""Returns the URI of this Address."""
-		return self.__uri
+		return self._uri
 
 	def setUri(self, uri):
 		"""Sets the URI of this Address."""
-		self.__uri = uri
+		self._uri = uri
 
 	def isWildcard(self):
 		"""This determines if this address is a wildcard address."""
 		pass
 
 	def __str__(self):
-		if self.__displayName is None:
-			result = str(self.__uri)
+		if self._displayName is None:
+			result = str(self._uri)
 		else:
-			result = '"' + self.__displayName + '" <' + str(self.__uri) + '>'
+			result = '"' + self._displayName + '" <' + str(self._uri) + '>'
 		return result
 
 class Hop(object):
 	"""Network address (host, port, transport) in format host[:port][;transport=udp|tcp]"""
 
-	def __init__(self, str = None):
+	def __init__(self, addr = None, transport = None):
 		self._host = None
 		self._port = None
-		self._transport = None
-		if not str is None:
-			self.parse(str)
+		self._transport = transport
+		if not addr is None:
+			self.parse(addr)
 
-	def parse(self, str):
-
-		if str is not None:
-			parts = str.split(':', 1)
-
+	def parse(self, addr):
+		if type(addr) is tuple:
+			(self._host, self._port) = addr 
+		elif not addr is None:
+			parts = addr.split(':', 1)
 			if len(parts) == 1:
 				self._host = parts[0]
-
 			elif len(parts) == 2 and parts[1].isdigit():
 				self._host = parts[0]
 				self._port = int(parts[1])
@@ -463,7 +458,7 @@ class Hop(object):
 
 	def __str__(self):
 
-		result = self._host
+		result = self._host if not self._host is None else "None"
 
 		if not self._port is None:
 			result += ':' + str(self._port)
@@ -1083,26 +1078,27 @@ class SipViaHeader(Header, dict):
 	def __init__(self, body = None):
 		Header.__init__(self, 'Via' , body)
 		dict.__init__(self)
+		self[SipViaHeader.PARAM_PROTOCOL] = 'SIP/2.0/' 
 
 		if body is not None:
 			(address, sep, parameters) = body.partition(';')
 			if len(address) == 0:
-				raise ESipMessageException	
+				raise ESipMessageException()
 			if len(sep) == 0:
 				parameters = None
 			
 			# get transport and parameters
-			(transport, sep, host) = address.partition(' ')	
+			(beg, sep, host) = address.partition(' ')	
 			
-			if not transport.startswith('SIP/2.0/') or len(sep) == 0:
-				raise ESipMessageException	
+			if not beg.startswith('SIP/2.0/') or len(sep) == 0:
+				raise ESipMessageException()
 
 			# get transport protocol 
-			protocol = transport[len('SIP/2.0/'):]	
-			if protocol.lower() not in [Sip.TRANSPORT_UDP, Sip.TRANSPORT_TCP]:
-				raise ESipMessageException	
+			transport = beg[len('SIP/2.0/'):]	
+			if transport.lower() not in [Sip.TRANSPORT_UDP, Sip.TRANSPORT_TCP, Sip.TRANSPORT_SCTP]:
+				raise ESipMessageException()
 
-			self[SipViaHeader.PARAM_PROTOCOL] = protocol
+			self[SipViaHeader.PARAM_TRANSPORT] = transport 
 	
 			# get host name and port
 			(hostAddress, sep, hostPort) = host.partition(':')
@@ -1157,11 +1153,11 @@ class SipViaHeader(Header, dict):
 		self[SipViaHeader.PARAM_PORT] = port
 
 	def getProtocol(self):
-		"""Returns the value of the protocol used."""
+		"""Returns the value of the protocol used. e.g. SIP/2.0"""
 		return self[SipViaHeader.PARAM_PROTOCOL] if SipViaHeader.PARAM_PROTOCOL in self else None
 
 	def setProtocol(self, protocol):
-		"""Sets the value of the protocol parameter."""
+		"""Sets the value of the protocol parameter. e.g. e.g. SIP/2.0"""
 		self[SipViaHeader.PARAM_PROTOCOL] = protocol
 
 	def getReceived(self):
@@ -1181,12 +1177,12 @@ class SipViaHeader(Header, dict):
 		self.setParameter(SipViaHeader.RPORT, rport)
 
 	def getTransport(self):
-		"""Returns the value of the transport parameter."""
+		"""Returns the value of the transport network protocol, e.g. tcp, udp, sctp"""
 		return self[Header.PARAM_TRANSPORT] if Header.PARAM_TRANSPORT in self else None
 
 	def setTransport(self, transport):
-		"""Sets the value of the transport."""
-		self.setParameter(SipViaHeader.PARAM_TRANSPORT, transport)
+		"""Sets the value of the transport, e.g. tcp, udp, sctp"""
+		self[Header.PARAM_TRANSPORT] = transport
 
 	def getTTL(self):
 		"""Returns the value of the ttl parameter, or -1 if this is not set."""
@@ -1198,7 +1194,7 @@ class SipViaHeader(Header, dict):
 
 	def __str__(self):
 		result = self.getName() + ': '
-		result += 'SIP/2.0/' + self.getProtocol().upper() + ' '
+		result += self.getProtocol().upper() + self.getTransport().upper() + ' '
 		result += self.getHost() 
 		if self.getPort() is not None:
 			result += ':' + str(self.getPort())
@@ -1206,7 +1202,7 @@ class SipViaHeader(Header, dict):
 		# other parameters
 		for paramName in self.keys():
 			# skip parameters used in address
-			if paramName in [SipViaHeader.PARAM_HOST, SipViaHeader.PARAM_PORT, SipViaHeader.PARAM_PROTOCOL]:
+			if paramName in [SipViaHeader.PARAM_HOST, SipViaHeader.PARAM_PORT, SipViaHeader.PARAM_PROTOCOL, SipViaHeader.PARAM_TRANSPORT]:
 				continue
 			paramValue = self[paramName]
 			if not paramValue is None:
@@ -1280,8 +1276,8 @@ class SipParser(object):
 	
 	def parseSIPMessage(self, buffer):
 
-		if buffer == None:
-			return
+		if buffer is None:
+			raise ESipMessageException()
 
 		# locate a body
 		msgBody = None
@@ -1291,7 +1287,8 @@ class SipParser(object):
 				msgBody = buffer[bodyOffset + len(bodySeparator):]
 				buffer = buffer[:bodyOffset]
 				break
-
+		if msgBody is None:
+			raise ESipMessageException()
 
 		# split message into lines and put aside start line
 		lines = buffer.splitlines()
@@ -1406,6 +1403,21 @@ class SipParser(object):
 			raise ESipMessageException
 
 		return result
+
+class AddressFactory(object):
+
+	@staticmethod
+	def createUri(str):
+		result = None
+		if str.startswith('sip'):
+			result = SipUri(str)
+		elif str.startswith('tel'):
+			result = TelUri(str)
+		else:
+			result = Uri(str)
+
+		return result
+
 
 class HeaderFactory(object):
 	HEADER_NAMES = {
@@ -1765,28 +1777,30 @@ class MessageFactory(object):
 
 	@staticmethod
 	def createRequestRegister(user, hop):
-		requestUri = SipUri('sip:%s' % user.getSipDomain())
-		userUri = SipUri('sip:%s@%s' % (user.getUserName(), user.getSipDomain()))
-		userSipAddress = SipAddress()
-		userSipAddress.setUri(userUri)
-		userSipAddress.setDisplayName(user.getDisplayName())
+		if not isinstance(user, SipAddress) or not isinstance(hop, Hop):
+			raise ESipMessageException("Invalid argument format")
+
+		requestUri = SipUri('sip:%s' % user.getUri().getHost())
 
 		result = SipRequest()
 		result.setMethod(SipRequest.METHOD_REGISTER)
 		result.setRequestUri(requestUri)
 
 		fromHeader = SipFromHeader()
-		fromHeader.setAddress(userSipAddress)
+		fromHeader.setAddress(user)
 		fromHeader.setTag(SipUtils.generateTag())
 		result.addHeader(fromHeader)
 		toHeader = SipToHeader()
-		toHeader.setAddress(userSipAddress)
+		toHeader.setAddress(user)
 		result.addHeader(toHeader)
 
 		result.addHeader(SipCallIdHeader(SipUtils.generateCallIdentifier(hop.getHost())))
 
 		result.addHeader(SipCSeqHeader('1 REGISTER'))
-		viaHeader = SipViaHeader('SIP/2.0/UDP some.host')
+		viaHeader = SipViaHeader()
+		viaHeader.setTransport(hop.getTransport())
+		viaHeader.setHost(hop.getHost())
+		viaHeader.setPort(hop.getPort())
 		viaHeader.setBranch(SipUtils.generateBranchId());
 		result.addHeader(viaHeader)
 		result.addHeader(MaxForwardsHeader('70'))
@@ -1801,14 +1815,14 @@ class MessageFactory(object):
 		result.addHeader(contactHeader);
 
 		# create authorization header
-		authorizationHeader = AuthorizationHeader()
-		authorizationHeader.setScheme('Digest')
-		authorizationHeader.setUserName(user.getAuthUserName())
-		authorizationHeader.setRealm(user.getSipDomain())
-		authorizationHeader.setUri(str(requestUri))
-		authorizationHeader.setNonce('')
-		authorizationHeader.setResponse('')
-		result.addHeader(authorizationHeader)
+		#authorizationHeader = AuthorizationHeader()
+		#authorizationHeader.setScheme('Digest')
+		#authorizationHeader.setUserName(user.getAuthUserName())
+		#authorizationHeader.setRealm(user.getSipDomain())
+		#authorizationHeader.setUri(str(requestUri))
+		#authorizationHeader.setNonce('')
+		#authorizationHeader.setResponse('')
+		#result.addHeader(authorizationHeader)
 		
 		return result
 
@@ -1925,6 +1939,20 @@ class UnitTestCase(unittest.TestCase):
 		self.USR_BOB_DOMAIN =  'beloxi.com'
 		self.USR_BOB_SHORT = 'sip:%s@%s' % (self.USR_BOB_USERNAME, self.USR_BOB_DOMAIN)
 		self.USR_BOB_ADDR = '"%s" <%s>' % (self.USR_BOB_DISPLAYNAME, self.USR_BOB_SHORT)
+
+	def testHop(self):
+		IP = "1.1.1.1"
+		h = Hop()
+		h = Hop("1.1.1.1")
+		self.assertEqual(h.getHost(), IP)
+		h = Hop("1.1.1.1:89")
+		self.assertEqual(h.getHost(), IP)
+		self.assertEqual(h.getPort(), 89)
+		h = Hop(("1.1.1.1", 89))
+		self.assertEqual(h.getHost(), IP)
+		self.assertEqual(h.getPort(), 89)
+		h.setTransport("udp")
+		self.assertEqual(h.getTransport(), "udp")
 
 	def testSipUri(self):
 		x = SipUri()
