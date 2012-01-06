@@ -1,0 +1,38 @@
+<accounts>
+
+  <account>
+    <sip-uri>sip:ITSY000001@brn10.iit.ims</sip-uri>
+    <display-name>ITSY000001</display-name>
+    <net-addr>64.9.169.27:60001</net-addr>
+    <digest-user>ITSY000001.priv@brn10.iit.ims</digest-user>
+    <digest-password>31000000001</digest-password>
+  </account>
+
+  <account>
+    <sip-uri>sip:ITSY000002@brn10.iit.ims</sip-uri>
+    <display-name>ITSY000002</display-name>
+    <net-addr>64.9.169.28:60001</net-addr>
+    <digest-user>ITSY000002.priv@brn10.iit.ims</digest-user>
+    <digest-password>31000000002</digest-password>
+  </account>
+
+  <account>
+    <sip-uri>sip:ITSY000001@brn38.iit.ims</sip-uri>
+    <display-name>ITSY000001</display-name>
+    <!-- <net-addr>64.2.181.198:60001</net-addr> -->
+    <net-addr>64.9.169.27:60001</net-addr>
+    <digest-user>ITSY000001.priv@brn38.iit.ims</digest-user>
+    <digest-password>33800000001</digest-password>
+  </account>
+
+  <account>
+    <sip-uri>sip:ITSY000002@brn38.iit.ims</sip-uri>
+    <display-name>ITSY000002</display-name>
+    <!-- <net-addr>64.2.181.199:60002</net-addr> -->
+    <net-addr>64.9.169.28:60001</net-addr>
+    <digest-user>ITSY000002.priv@brn38.iit.ims</digest-user>
+    <digest-password>33800000002</digest-password>
+  </account>
+
+</accounts>
+

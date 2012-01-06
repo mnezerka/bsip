@@ -40,7 +40,7 @@ class SipRequestEvent(object):
 	 * Request - the Request message received 
 	"""
 
-	def __init__(self, source, request, serverTransaction = None, dialog = None):
+	def __init__(self, source, request, serverTransaction = None, dialog = None, hop = None):
 		"""Constructs a RequestEvent encapsulating the Request that has been received by
 		the underlying SipProvider. This RequestEvent once created is passed to processRequest
 		method of the SipListener for application processing."""
@@ -56,6 +56,8 @@ class SipRequestEvent(object):
 		self._request = request
 
 		self._dialog = dialog 
+
+		self._hop = None
 
 	def getServerTransaction(self):
 		"""Gets the server transaction associated with this RequestEvent"""
@@ -162,62 +164,66 @@ class SipListener(object):
 		"""Process an asynchronously reported TransactionTerminatedEvent."""
 		raise EInterfaceCall()
 
-class IpProcessor(object):
-	"""Abstract class for all Ip processors"""
+class SipProcessor(object):
+	"""Base class for all Sip processors"""
+	LOGGER_NAME = 'listening_point'	
+
+	def __init__(self):
+		self._sipListeners = []
+
+	def addSipListener(self, sipListener):
+		self._sipListeners.append(sipListener)
+
+	def getSipListeners(self):
+		return self._sipListeners
 
 	# process incoming data
-	def onData(self, data):
+	def onData(self, data, localHop, peerHop):
 		raise EInterfaceCall()
 
-class SipListeningPoint(IpProcessor):
+class SipListeningPoint(SipProcessor):
 	"""Sip Listening Point"""
 	LOGGER_NAME = 'listening_point'	
 
-	def __init__(self, sipStack, ipAddress, port, transport):
+	def __init__(self, sipStack, hop):
 
-		IpProcessor.__init__(self)
+		SipProcessor.__init__(self)
 
 		self._sipStack = sipStack
-		self._ipAddress = ipAddress 
-		self._port = port 
-		self._transport = transport
+		self._hop = hop
+		self._buffer = "" 
 
 		logger = logging.getLogger(self.LOGGER_NAME)
-		logger.debug('Creating socket (%s, %d, %s)', self._ipAddress, self._port, self._transport)
+		logger.debug('Creating socket %s' % self._hop)
 		ipDispatcher = self._sipStack.getIpDispatcher()
-		ipDispatcher.createListeningSocket(self, self._ipAddress, self._port, self._transport)
+		ipDispatcher.createListeningSocket(self, self._hop.getHost(), self._hop.getPort(), self._hop.getTransport())
 
-
-	def getPort(self):
-		return self._port 
-
-	def getTransport(self):
-		return self._transport
-
-	def setIpAddress(self, ipAddress):
-		self._ipAddress = ipAddress
-
-	def getIpAddress(self):
-		return self._ipAddress
+	def getHop(self):
+		return self._hop
 
 	def getKey(self):
-		result = 'lp_' + self._ipAddress + ':' + str(self._port) + '/' + self._transport 
+		result = 'lp_' + self._hop.getHost() + ':' + str(self._hop.getPort()) + '/' + self._hop.getTransport()
 		return result.lower()
     
-	def onData(self, data):
+	def onData(self, data, localHop, peerHop):
 		logger = logging.getLogger(self.LOGGER_NAME)
-		logger.debug('onData() Enter data length: %d', len(data))
-		
+		logger.debug('onData() Enter, id: %s, buffer length: %d, data length: %d, local: %s, remote: %s'
+			% (self.getKey(), len(self._buffer), len(data), localHop, peerHop))
 
+		self._buffer += data
 		# try to parse incoming data
 		sipParser = sipmessage.SipParser()
 		try:
-			msg  = sipParser.parseSIPMessage(data)
-		except ESipStackException: 
-			logger.debug('ESipStackException when parsing message')
+			msg  = sipParser.parseSIPMessage(self._buffer)
+			self._buffer = ""
+		except ESipMessageException: 
+			self._buffer += data 
+			logger.debug('parsing failed, adding data to buffer, new buffer length is: %d' % len(self._buffer))
+			if len(self._buffer) > 1024 * 10:
+				logger.debug('exception when parsing message (data in buffer are too long)')
 			return
 
-		blockListeners = self._sipStack.processMessageReceive(msg)
+		blockListeners = False
 
 		event = None
 
@@ -225,13 +231,13 @@ class SipListeningPoint(IpProcessor):
 		if createTransactions is None:
 			createTransactions = True 
 
-		logger.debug('onData() getting parameter %s: %s', SipStack.PARAM_CREATE_TRANSACTIONS, str(createTransactions))
+		logger.debug('getting parameter %s: %s', SipStack.PARAM_CREATE_TRANSACTIONS, str(createTransactions))
 
 		# prepare response event
 		if isinstance(msg, sipmessage.SipRequest):
 
 			# check for the required headers.
-			topMostVia = msg.getTopmostViaHeader()
+			topVia = msg.getTopmostViaHeader()
 			msg.checkHeaders()
 
 			# server transaction
@@ -240,17 +246,11 @@ class SipListeningPoint(IpProcessor):
 			# TODO: if serverTransaction not None then it is retransmission
 				
 			if createTransactions and serverTransaction is None:
-				serverTransaction = self._sipStack.createServerTransaction(msg)
-
-				#tranId = msg.getTransactionId()
-				#logger.debug('onData(), looking for existing server transaction: %s, %s ', tranId, msg.getFirstLine())
+				serverTransaction = self._sipStack.createServerTransaction(msg, self)
 
 			#  modify transaction state according to state machine 
 			if not serverTransaction is None:
-				if msg.getMethod() in [SipRequest.METHOD_INVITE, SipRequest.METHOD_ACK]:
-					serverTransaction.setState(SipTransaction.TRANSACTION_STATE_PROCEEDING)
-				else: 
-					serverTransaction.setState(SipTransaction.TRANSACTION_STATE_TRYING)
+				blockListeners = blockListeners or serverTransaction.processRequest(msg)
 
 			# identify (match) dialog
 			dialog = None
@@ -275,12 +275,14 @@ class SipListeningPoint(IpProcessor):
 			# create new ResponseEvent
 			event = SipResponseEvent(self, msg, clientTransaction, dialog)
 
+		blockListeners = self._sipStack.processMessageReceive(msg)
+
 		# allow message preprocessing
 		blockListeners = blockListeners or self._sipStack.preprocessSipEvent(event)
 
 		# notify listeners
 		if not blockListeners:
-			for listener in self._sipStack.getSipListeners():
+			for listener in self.getSipListeners():
 				if isinstance(msg, sipmessage.SipRequest):
 					listener.processRequest(event)
 				elif isinstance(msg, sipmessage.SipResponse):
@@ -297,9 +299,9 @@ class SipListeningPoint(IpProcessor):
 		logger.debug('getViaHeader() Enter')
 
 		result = sipmessage.SipViaHeader()
-		result.setHost(self.getIpAddress())
-		result.setProtocol(self.getTransport())
-		result.setPort(self.getPort())
+		result.setHost(self.getHop().getHost())
+		result.setTransport(self.getHop().getTransport())
+		result.setPort(self.getHop().getPort())
 
 		logger.debug('getViaHeader() Leave')
 
@@ -351,9 +353,9 @@ class IpDispatcher(object):
 	def getListeningSockets(self):
 		return self.__listeningSockets
 
-	def createListeningSocket(self, ipProcessor, ipAddress, port, transport):
+	def createListeningSocket(self, sipProcessor, ipAddress, port, transport):
 
-		if not isinstance(ipProcessor, IpProcessor):
+		if not isinstance(sipProcessor, SipProcessor):
 			raise TypeError()
 
 		logger = logging.getLogger(self.LOGGER_NAME)
@@ -376,7 +378,7 @@ class IpDispatcher(object):
 
 		if not s is None:
 			self.addListeningSocket(s)
-			self.__processors.append((s, ipProcessor, []))
+			self.__processors.append((s, sipProcessor, []))
 			logger.debug('socket created and added to list of listening sockets')
 			
 		# check if instance of network thread should be created
@@ -517,17 +519,22 @@ class IpNetworkThread(threading.Thread):
 			try:
 				(in_, out_, exc_) = select.select(inputSockets, [] , [], 1)
 			except select.error, e:
-				logger.debug('Network error')
+				logger.debug('Network error (select failed)')
 				break	
 
 			for fd in in_:
 				processor = self.__ipDispatcher.getProcessorForSocket(fd)
 				if fd in self.__ipDispatcher.getListeningSockets():
+
+					localHop = Hop(fd.getsockname())
+
 					if fd.type == socket.SOCK_DGRAM:
-						logger.debug('Reading data from UDP socket')
-						data = fd.recv(1024)
+						localHop.setTransport(Sip.TRANSPORT_UDP)
+						logger.debug('Reading data from UDP socket %s' % localHop)
+						(data, peerAddr) = fd.recvfrom(1024 * 8)
+						peerHop = Hop(peerAddr, Sip.TRANSPORT_UDP)
 						logger.debug('Finished reading from UDP socket: %d bytes', len(data))
-						event = WorkerEventData(data, processor)
+						event = WorkerEventData(data, processor, localHop, peerHop)
 						self.__queue.put(event)
 
 					elif fd.type == socket.SOCK_STREAM:
@@ -537,15 +544,16 @@ class IpNetworkThread(threading.Thread):
 						self.__ipDispatcher.registerClientSocket(fd, clientSocket)
 				else:
 					logger.debug('Reading data from %d', fd.fileno())
-					data = fd.recv(1024)
+					(data, peerAddr) = fd.recvfrom(1024 * 8)
+					peerHop = Hop(peerAddr, Sip.TRANSPORT_UDP)
 					if data:
 						while True:
-							dataChunk = fd.recv(1024)
+							dataChunk = fd.recv(1024 * 8)
 							if not dataChunk: break
 							data += dataChunk
 
 						logger.debug('Finished reading from TCP socket: %d bytes', len(data))
-						event = WorkerEventData(data, processor)
+						event = WorkerEventData(data, processor, localHop, peerHop)
 						self.__queue.put(event)
 					else:
 						logger.debug('Connection to %d closed', fd.fileno())
@@ -573,18 +581,26 @@ class IWorkerEvent(object):
 class WorkerEventData(IWorkerEvent):
 	"""Data event"""
 
-	def __init__(self, data = None, processor = None):
-		self.__data = data 
-		self.__processor = processor 
+	def __init__(self, data = None, processor = None, localHop = None, peerHop = None):
+		self._data = data 
+		self._processor = processor 
+		self._localHop = localHop
+		self._peerHop = peerHop
 
 	def setData(self, data):
-		self.__data = data 
+		self._data = data 
 
 	def getData(self):
-		return self.__data
+		return self._data
 
 	def getProcessor(self):
-		return self.__processor
+		return self._processor
+
+	def getLocalHop(self):
+		return self._localHop
+
+	def getPeerHop(self):
+		return self._peerHop
 
 class WorkerEventStop(IWorkerEvent):
 	"""Thread stop event"""
@@ -626,7 +642,7 @@ class WorkerThread(threading.Thread):
 				processor = event.getProcessor() 
 
 				if not processor is None:
-					processor.onData(event.getData())
+					processor.onData(event.getData(), event.getLocalHop(), event.getPeerHop())
 
 			elif isinstance(event, WorkerEventStop):
 				running = False
@@ -682,9 +698,6 @@ class SipStack(dict):
 	PARAM_CREATE_TRANSACTIONS = 'create_transactions'
 	PARAM_CREATE_DIALOGS = 'create_dialogs'
 
-	TRANSPORT_UDP = "udp"
-	TRANSPORT_TCP = "tcp"
-
 	MTU = 1500
 	MESSAGE_MAX_LENGTH = MTU - 200
 
@@ -697,7 +710,6 @@ class SipStack(dict):
 		self._listeningPoints = {}
 		self._clientTransactions = {} 
 		self._serverTransactions = {} 
-		self._sipListeners = []
 		self._sipInterceptors = []
 		self._calls = dict()
 
@@ -721,8 +733,8 @@ class SipStack(dict):
 			self._calls[callId] = 1
 		return self._calls[callId]		
 
-	def getSipListeners(self):
-		return self._sipListeners
+	#def getSipListeners(self):
+	#	return self._sipListeners
 
 	def getServerTransactions(self):
 		return self._serverTransactions	
@@ -730,8 +742,8 @@ class SipStack(dict):
 	def getIpDispatcher(self):
 		return self._ipDispatcher
 
-	def addSipListener(self, sipListener):
-		self._sipListeners.append(sipListener)
+	#def addSipListener(self, sipListener):
+	#	self._sipListeners.append(sipListener)
 
 	def addSipInterceptor(self, preprocessor):
 		self._sipInterceptors.append(preprocessor)
@@ -808,7 +820,7 @@ class SipStack(dict):
 				break;
 
 			# if transports are equal, return this listening point 
-			if lp.getTransport().lower() == transport.lower():
+			if lp.getHop().getTransport().lower() == transport.lower():
 				result = lp
 				break
 
@@ -817,6 +829,26 @@ class SipStack(dict):
 		logger.debug('getListeningPointForTransport() Leaving, result is %s', lpKey)
 
 		return result
+
+	def getListeningPointForViaHeader(self, viaHeader):
+		logger = logging.getLogger(self.LOGGER_NAME)
+		logger.debug('getListeningPointForViaHeader() Entering, header=%s' % str(viaHeader))
+
+		result = None
+
+		for lpKey in self._listeningPoints:
+			lp = self._listeningPoints[lpKey]
+
+			lpHop = lp.getHop()
+			if lpHop.getTransport() == viaHeader.getTransport() and lpHop.getPort() == viaHeader.getPort() and lpHop.getHost() == viaHeader.getHost():
+				result = lp
+
+		lpKey = result.getKey() if not result is None else 'None'
+
+		logger.debug('getListeningPointForViaHeader() Leaving, result is %s', lpKey)
+
+		return result
+
 
 	def fixViaHeaders(self, sipMessage, sipListeningPoint):
 		logger = logging.getLogger(self.LOGGER_NAME)
@@ -829,8 +861,8 @@ class SipStack(dict):
 			logger.debug('Adding new Via header generated by listening point')
 			sipMessage.addHeader(lpVia)
 		else:
-			if lpVia.getProtocol() != topVia.getProtocol():
-				topVia.setProtocol(lpVia.getProtocol())
+			if lpVia.getTransport() != topVia.getTransport():
+				topVia.setTransport(lpVia.getTransport())
 
 			if lpVia.getHost() != topVia.getHost():
 				topVia.setHost(lpVia.getHost())
@@ -861,7 +893,7 @@ class SipStack(dict):
 
 		# transport from top most via header has higher preference than parameter of this method call
 		if not topVia is None:
-			transport = topVia.getProtocol()
+			transport = topVia.getTransport()
 
 		# find net element where to send request
 		nextHop = self.getNextHop(request);
@@ -869,13 +901,16 @@ class SipStack(dict):
 			raise ETransactionUnavailable('Cannot resolve next hop -- transaction unavailable')
 
 		# modify transport protocol if necessary
-		if transport == SipStack.TRANSPORT_UDP and len(str(request)) > SipStack.MESSAGE_MAX_LENGTH:
+		if transport == Sip.TRANSPORT_UDP and len(str(request)) > SipStack.MESSAGE_MAX_LENGTH:
 			transport = Sip.TRANSPORT_TCP
+			topVia.setTransport(transport)
 
 		logger.debug('next hop identified, transport is %s, hop is %s', transport, str(nextHop))
 
 		# look for listening point to be used for sending a message
-		lp = self.getListeningPointForTransport(transport)
+		lp = self.getListeningPointForViaHeader(topVia)
+		if lp is None:
+			lp = self.getListeningPointForTransport(transport)
 		if lp is None:
 			lp = self.getListeningPointForTransport()
 		if lp is None:
@@ -889,8 +924,8 @@ class SipStack(dict):
 
 		message = str(request)
 
-		localIpAddress = lp.getIpAddress()
-		localPort = lp.getPort()
+		localIpAddress = lp.getHop().getHost()
+		localPort = lp.getHop().getPort()
 
 		logger.debug('  local address: %s', localIpAddress)
 		logger.debug('  local port: %d', localPort)
@@ -912,7 +947,7 @@ class SipStack(dict):
 
 		logger.debug('sendRequest() Leave')
 
-	def sendResponse(self, response):
+	def sendResponse(self, response, lp = None):
 		"""Sends the Response statelessly, that is no transaction record is associated with this action.
 		This method implies that the application is functioning as either a stateless proxy or a stateless UAS.""" 
 
@@ -926,7 +961,7 @@ class SipStack(dict):
 			raise ESipStackException('No via header in response')
 
 		# get transport
-		transport = topVia.getProtocol()
+		transport = topVia.getTransport()
 
 		# check to see if Via has "received paramaeter". If so
 		# set the host to the via parameter. Else set it to the Via host.
@@ -942,7 +977,8 @@ class SipStack(dict):
 			raise ESipStackException('Cannot determine remote port from response')
 
 		# look for listening point to be used for sending a message
-		lp = self.getListeningPointForTransport(transport)
+		if lp is None: 
+			lp = self.getListeningPointForTransport(transport)
 		if lp is None:
 			lp = self.getListeningPointForTransport()
 		if lp is None:
@@ -952,22 +988,24 @@ class SipStack(dict):
 
 		# notify all interceptors
 		for si in self._sipInterceptors:
-			si.onMessageSend(request)
+			si.onMessageSend(response)
 
 		message = str(response)
 
-		localAddress = lp.getIpAddress()
-		localPort = lp.getPort()
+		localIpAddress = lp.getHop().getHost()
+		localPort = lp.getHop().getPort()
 
-		logger.debug('  local address: %s', localAddress)
+		logger.debug('  local address: %s', localIpAddress)
 		logger.debug('  local port: %d', localPort)
 		logger.debug('  dst address: %s', dstHost)
 		logger.debug('  dst port: %d', dstPort)
 		logger.debug('  msg length: %d', len(message))
 		logger.debug('  transport: %s', transport)
 
+		logger.debug('sending message:\n------\n%s\n-------', message)
+
 		ipDispatcher = self.getIpDispatcher()
-		ipDispatcher.sendSync(localAddress, 0, dstHost, dstPort, message, transport)
+		ipDispatcher.sendSync(localIpAddress, 0, dstHost, dstPort, message, transport)
 		
 		logger.debug('sendResponse() Leave')
 
@@ -1008,10 +1046,6 @@ class SipStack(dict):
 		if request is None:
 			raise ESipStackInvalidArgument('No Request')
 
-		#if not self.__sipStack.isRunning():
-		#	raise EInvalidState('SipStack is not in running state')
-
-
 		# Set the brannch id before you ask for a tx.
 		# If the user has set his own branch Id and the
 		# branch id starts with a valid prefix, then take it.
@@ -1035,7 +1069,7 @@ class SipStack(dict):
 		if tranId in self._clientTransactions:
 			raise ESipStackException('Transaction already assigned to request')
 
-		logger.debug('Could not find existing transaction for ' + request.getFirstLine() + ', creating a new one');
+		logger.debug('Creating new client transaction for request: ' + request.getFirstLine());
 
 		ct = SipClientTransaction(self, request)
 		ct.setBranch(branch);
@@ -1063,7 +1097,7 @@ class SipStack(dict):
 
 		return ct 
 
-	def createServerTransaction(self, request):
+	def createServerTransaction(self, request, lp = None):
 		logger = logging.getLogger(self.LOGGER_NAME)
 		logger.debug('createServerTransaction() Enter')
 
@@ -1080,9 +1114,13 @@ class SipStack(dict):
 		if tranId in self._serverTransactions:
 			raise ESipStackException('Transaction already assigned to request')
 
-		result = SipServerTransaction(self, request)
+		logger.debug('creating new server transaction for request: ' + request.getFirstLine());
+		result = SipServerTransaction(self, request, lp)
+		result.setBranch(tranId)
+		logger.debug('created new server transaction: %s, %s ', tranId, request.getFirstLine())
+
 		self._serverTransactions[tranId] = result 
-		logger.debug('onData(), created new server transaction: %s, %s ', tranId, request.getFirstLine())
+
 		logger.debug('createServerTransaction() Leave')
 
 		return result
@@ -1228,13 +1266,14 @@ class SipTransaction(object):
 
 	LOGGER_NAME = 'SipTransaction'
 	
-	def __init__(self, sipStack, originalRequest):
+	def __init__(self, sipStack, originalRequest, lp = None):
 		self._applicationData = None
 		self._branch = None
 		self._dialog = None
 		self._originalRequest = originalRequest 
 		self._state = None
 		self._sipStack = sipStack
+		self._lp = lp# listening point used for sending/receiving transaction messages
 
 	def getApplicationData(self):
 		"""Returns the application data associated with the transaction.This specification
@@ -1282,20 +1321,23 @@ class SipTransaction(object):
 		"""Sets new state of the transaction"""
 
 		logger = logging.getLogger(self.LOGGER_NAME)
-		logger.debug('setState(), %s => %s', self._state, state)
+		logger.debug('setState(), branch=%s,  %s => %s' % (self._branch, self._state, state))
 		self._state = state
 
 	def terminate(self):
 		"""Terminate this transaction and immediately release all stack resources associated with it."""
 		raise ENotImplemented()
 
+	def getListeningPoint(self):
+		return self._lp
+
 class SipClientTransaction(SipTransaction):
 	""" Client transaction"""
 
 	LOGGER_NAME = 'SipClientTransaction'
 
-	def __init__(self, sipStack, request):
-		SipTransaction.__init__(self, sipStack, request)
+	def __init__(self, sipStack, request, lp = None):
+		SipTransaction.__init__(self, sipStack, request, lp)
 
 	def sendAck(self):
 		"""Creates a new Ack message from the Request associated with this client transaction."""
@@ -1466,8 +1508,30 @@ class SipServerTransaction(SipTransaction):
 
 	LOGGER_NAME = 'SipServerTransaction'
 
-	def __init__(self, sipStack, request):
-		SipTransaction.__init__(self, sipStack, request)
+	def __init__(self, sipStack, request, lp = None):
+		SipTransaction.__init__(self, sipStack, request, lp)
+
+	def processRequest(self, request):
+		logger = logging.getLogger(self.LOGGER_NAME)
+		state = self.getState()
+		logger.debug('processRequest() Enter in state %s' % state)
+
+		blockListeners = False
+
+		invTransaction = request.getMethod() == SipRequest.METHOD_INVITE
+
+		if request.getMethod() in [SipRequest.METHOD_INVITE, SipRequest.METHOD_ACK]:
+			self.setState(SipTransaction.TRANSACTION_STATE_PROCEEDING)
+		else: 
+			self.setState(SipTransaction.TRANSACTION_STATE_TRYING)
+
+		if blockListeners:
+			logger.debug('transaction requires discarding message %s' % request.getMethod())
+
+		logger.debug('processRequest() Leave')
+
+		return blockListeners 
+		
 
 	def enableRetransmissionAlerts(self):
 		"""Enable the timeout retransmit notifications for the ServerTransaction."""
@@ -1596,7 +1660,7 @@ class SipServerTransaction(SipTransaction):
 			# provisional responses
 			self.setState(SipTransaction.TRANSACTION_STATE_PROCEEDING)
 
-		self._sipStack.sendResponse(response)
+		self._sipStack.sendResponse(response, self.getListeningPoint())
 
 		logger.debug('sendResponse() Leave')
 
@@ -1640,7 +1704,7 @@ class DigestAuthenticator(SipInterceptor):
 		# get user to be used for authentication 
 		fromHeader = request.getHeaderByType(SipFromHeader)
 		fromUri = fromHeader.getAddress().getUri()
-		user = self._accountManager.getUserByUserName(fromUri.getUser())
+		user = self._accountManager.getUserByUri(fromUri)
 		if user is None:
 			raise ESipStackException('No user credentials provided for authentication')
 
@@ -1760,7 +1824,7 @@ class DigestAuthenticator(SipInterceptor):
 		user = authParams["user"]
 
 		authHeader.setScheme('Digest')
-		authHeader.setUserName(user.getAuthUserName())
+		authHeader.setUserName(user.getDigestUser())
 		authHeader.setRealm(authParams[Header.PARAM_REALM])
 		authHeader.setNonce(authParams[Header.PARAM_NONCE])
 		authHeader.setUri(authParams[Header.PARAM_URI])
@@ -1845,7 +1909,7 @@ class DigestAuthenticator(SipInterceptor):
 
 					response = MessageDigestAlgorithm.calculateResponse(
 						authParams[Header.PARAM_ALGORITHM],
-						user.getHashUserDomainPassword(),
+						user.getDigestHash(),
 						authParams[Header.PARAM_NONCE],
 						authParams[Header.PARAM_NC],
 						authParams[Header.PARAM_CNONCE],
