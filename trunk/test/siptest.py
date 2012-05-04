@@ -83,5 +83,41 @@ class SipTest(SipListener):
 		finally:
 			self.stack.stop()
 
+  def loadFromXml(self, filePath):
+    '''Load configuration from xml file'''
+    try:
+        xmlDoc = minidom.parse(filePath)
+    except Exception:
+        print("Error: processing (parsing) config xml file failed:", filePath)
+        raise
+    self._parseFromXmlDoc(xmlDoc)   
+
+  def _parseFromXmlDoc(self, xmlDoc):
+    testbeds = xmlDoc.getElementsByTagName("testbeds")
+    for tbNode in testbeds:
+      for accountEl in accountNode.childNodes:
+        if accountEl.nodeType == accountEl.ELEMENT_NODE and accountEl.tagName.lower() == "account":
+          user = User()
+          userAddr = sipmessage.SipAddress()  
+          user.setAddress(userAddr)
+          for userEl in accountEl.childNodes:
+            if userEl.nodeType != accountEl.ELEMENT_NODE:
+              continue
+            if userEl.tagName.lower() == "sip-uri":
+              uri = sipmessage.AddressFactory.createUri(_xmlNodeGetText(userEl))
+              userAddr.setUri(uri)
+            if userEl.tagName.lower() == "display-name":
+              userAddr.setDisplayName(_xmlNodeGetText(userEl))
+            if userEl.tagName.lower() == "digest-user":
+              user.setDigestUser(_xmlNodeGetText(userEl))
+            if userEl.tagName.lower() == "digest-password":
+              user.setDigestPassword(_xmlNodeGetText(userEl))
+            if userEl.tagName.lower() == "net-addr":
+              userHop = sipmessage.Hop(_xmlNodeGetText(userEl))
+              userHop.setTransport(sipmessage.Sip.TRANSPORT_UDP)
+              user.setHop(userHop)
+
+          if not user.getUri() is None:
+            self.add(user)
 
 

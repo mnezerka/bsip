@@ -84,12 +84,13 @@ class SipUeRegDereg(SipUe):
 
 OUTBOUND_PROXY = "22.10.31.72:5060" # tb310
 OUTBOUND_PROXY = "22.38.31.72:5060" # tb338
+OUTBOUND_PROXY = "22.56.31.72:5060" # tb356
 
 # user accounts
 accounts = AccountManager()
-accounts.loadFromXml('users.xml')
-user1 = accounts.getUserByUri(SipUri("sip:ITSY000001@brn38.iit.ims"))
-user2 = accounts.getUserByUri(SipUri("sip:ITSY000002@brn38.iit.ims"))
+accounts.loadFromXml('users_356.xml')
+user1 = accounts.getUserByUri(SipUri("sip:ITSY000001@brn56.iit.ims"))
+user2 = accounts.getUserByUri(SipUri("sip:ITSY000002@brn56.iit.ims"))
 
 # sip stack
 sipStack = SipStack({
