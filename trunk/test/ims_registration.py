@@ -54,14 +54,14 @@ class SipUeRegDereg(SipUe):
       self.logMsg("starting registration %d of %d" % (self._processed, self._count))
       self.registerRequest = MessageFactory.createRequestRegister(self._user.getAddress(), self._user.getHop())
       # create authorization header (special for our IMS) 
-      authHeader = AuthorizationHeader()
-      authHeader.setScheme('Digest')
-      authHeader.setUserName(self._user.getDigestUser())
-      authHeader.setRealm(self._user.getUri().getHost())
-      authHeader.setUri(str(self.registerRequest.getRequestUri()))
-      authHeader.setNonce('')
-      authHeader.setResponse('')
-      self.registerRequest.addHeader(authHeader)
+#      authHeader = AuthorizationHeader()
+#      authHeader.setScheme('Digest')
+#      authHeader.setUserName(self._user.getDigestUser())
+#      authHeader.setRealm(self._user.getUri().getHost())
+#      authHeader.setUri(str(self.registerRequest.getRequestUri()))
+#      authHeader.setNonce('')
+#      authHeader.setResponse('')
+#      self.registerRequest.addHeader(authHeader)
       tran = self.getSipStack().createClientTransaction(self.registerRequest)
       self.logMsg("sending REGISTER")
       self.setState(SipUe.STATE_REGISTRATION)
@@ -98,11 +98,12 @@ class SipUeRegDereg(SipUe):
 OUTBOUND_PROXY = "22.10.31.72:5060" # tb310
 OUTBOUND_PROXY = "22.38.31.72:5060" # tb338
 OUTBOUND_PROXY = "22.56.31.72:5060" # tb356
+OUTBOUND_PROXY = "127.0.0.1:5060"
 
 # user accounts
 accounts = AccountManager()
-accounts.loadFromXml('users_356.xml')
-user1 = accounts.getUserByUri(SipUri("sip:ITSY000001@brn56.iit.ims"))
+accounts.loadFromXml('users_blue.xml')
+user1 = accounts.getUserByUri(SipUri("sip:blue1@blue.home.net"))
 #user2 = accounts.getUserByUri(SipUri("sip:ITSY000002@brn38.iit.ims"))
 
 # sip stack
@@ -118,6 +119,7 @@ sipStack.addSipInterceptor(authenticator)
 # user equipments
 ue1 = SipUeRegDereg(user1, sipStack)
 ue1.setCount(10)
+
 # test
 sipTest = SipTest(sipStack)
 sipTest.addUe(ue1)

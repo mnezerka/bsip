@@ -20,7 +20,7 @@
     <sip-uri>sip:ITSY000001@brn38.iit.ims</sip-uri>
     <display-name>ITSY000001</display-name>
     <!-- <net-addr>64.2.181.198:60001</net-addr> -->
-    <net-addr>64.9.169.27:60001</net-addr>
+    <net-addr>127.0.0.1:60001</net-addr>
     <digest-user>ITSY000001.priv@brn38.iit.ims</digest-user>
     <digest-password>33800000001</digest-password>
   </account>

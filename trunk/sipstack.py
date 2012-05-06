@@ -974,7 +974,8 @@ class SipStack(dict):
     if dstPort is None:
       dstPort = topVia.getPort()
     if dstPort is None:
-      raise ESipStackException('Cannot determine remote port from response')
+      dstPort = 5060
+      #raise ESipStackException('Cannot determine remote port from response')
 
     # look for listening point to be used for sending a message
     if lp is None: 
@@ -1666,7 +1667,12 @@ class SipServerTransaction(SipTransaction):
 
 ###### authentication and authorization stuff ########################################
 class DigestAuthenticator(SipInterceptor):
-  """A helper class that provides useful functionality for clients that need to authenticate with servers."""
+  """A helper class that provides useful functionality for clients that need to authenticate with servers.
+
+
+  Cache is used to store authorization data for ongoing transactions. Cache is indexed by callId on first
+  level and by realm on second level.       
+  """
 
   ALG_MD5 = 'md5'
 
@@ -1686,6 +1692,7 @@ class DigestAuthenticator(SipInterceptor):
 
     request = None
 
+    # check correct response code and presence of proper authentication header
     if response.getStatusCode() == SipResponse.RESPONSE_UNAUTHORIZED: 
       authHeader = response.getHeaderByType(WwwAuthenticateHeader)
       if authHeader is None:
@@ -1736,7 +1743,7 @@ class DigestAuthenticator(SipInterceptor):
       qop = None
     logger.debug('selected qop is: %s', qop)
 
-    # create new authorization record
+    # create new authorization record for security domain identified by realm
     authParams = dict({
       "user": user,
       Header.PARAM_QOP: qop,
@@ -1749,7 +1756,7 @@ class DigestAuthenticator(SipInterceptor):
       "method": request.getMethod(),
       Header.PARAM_CNONCE: "xyz"})
 
-    # update existing authorization header or create new one
+    # update existing authorization header or create new one (use realm as key for searching)
     relatedAuthorizationHeader = None
     if isinstance(authHeader, WwwAuthenticateHeader):
       authorizationHeaders = request.getHeadersByType(AuthorizationHeader)
@@ -1846,7 +1853,6 @@ class DigestAuthenticator(SipInterceptor):
     logger.debug('updateAuthorizationHeader() Leave')
 
   def onMessageReceive(self, msg):
-  #def onEvent(self, event):
     logger = logging.getLogger(self.LOGGER_NAME)
     logger.debug('onMessageReceive() Enter')
 
@@ -1897,15 +1903,16 @@ class DigestAuthenticator(SipInterceptor):
     #fromUri = fromHeader.getAddress().getUri()
     cacheId = msg.getCallId()
     #cacheId = "%s@%s" % (fromUri.getUser(), fromUri.getHost())
-    if  cacheId in self._cachedCredentials:
+    if cacheId in self._cachedCredentials:
       logger.debug("found cache entry for cache id %s" % cacheId)
       allRealmAuthParams = self._cachedCredentials[cacheId]
 
       authHeaders = msg.getHeadersByType(AuthorizationHeader) + msg.getHeadersByType(ProxyAuthorizationHeader)
       for authHeader in authHeaders:
         realm = authHeader.getRealm()
-        logger.debug("realm is %s" % realm)
+        logger.debug("processing authorization header identified by realm %s" % realm)
         if not realm is None and realm in allRealmAuthParams:
+          logger.debug("realm %s found in cache" % realm)
           authParams = allRealmAuthParams[realm]
           authParams[Header.PARAM_NC] = authParams[Header.PARAM_NC] + 1
           
@@ -1922,11 +1929,7 @@ class DigestAuthenticator(SipInterceptor):
             msg.getContent(),
             authParams[Header.PARAM_QOP])
 
-
           self.updateAuthorizationHeader(authHeader, authParams, response)
-
-        # look for realm
-        logger.debug("following realm will be used for authorization: %s" % realm)
 
     logger.debug('onMessageSend() Leave')
 
@@ -1969,6 +1972,10 @@ class MessageDigestAlgorithm(object):
     # check required parameters
     if hashUserNameRealmPasswd is None or method is None or digest_uri_value is None or nonce_value is None:
       raise EInvalidArgument('Not enought parameters to calculate digest response')
+
+    # check algorithm 
+    if not algorithm is None and algorithm != 'MD5':
+      raise EInvalidArgument('Only MD5 algorithm is supported')
 
     # The following follows closely the algorithm for generating a response
     # digest as specified by rfc2617
