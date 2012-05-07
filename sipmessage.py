@@ -17,6 +17,7 @@ class ESipMessageHeaderInvalid(ESipMessageException):
   pass
 
 class Sip(object):
+  '''General SIP protocol definitions'''
 
   # cookie that should be used as a prefix for all branch hashes
   BRANCH_MAGIC_COOKIE = 'z9hG4bK'
@@ -388,7 +389,6 @@ class SipAddress(object):
         self._uri = TelUri(userAddr)
       else:
         raise ESipMessageException
-          
 
   def getDisplayName(self):
     """Gets the display name of this Address, or null if the attribute is not set."""
@@ -827,7 +827,6 @@ class ProxyAuthorizationHeader(AuthenticationHeader):
   def __init__(self, body = None):
     AuthenticationHeader.__init__(self, 'Proxy-Authorization', body)
 
-
 class SipAddressHeader(Header, dict):
   """Abstract class: Sip Address header"""
 
@@ -860,6 +859,7 @@ class SipAddressHeader(Header, dict):
   def __str__(self):
     result = str(self.getName()) + ': '
     result += str(self.__address)
+    result += "yes"
     for param in self.keys():
       result += ';' + param + '=' + self[param]
     return result
@@ -911,7 +911,6 @@ class ContentLengthHeader(Header):
       elif body.isdigit():
         self._contentLength = int(body)
       else:
-        print type(body)
         raise ESipMessageException("Invalid header body for Content-length header")
 
   def getContentLength(self):
@@ -1275,7 +1274,6 @@ class SipParser(object):
         item = unquote_header_value(item[1:-1])
       result.append(item)
     return result
-
   
   def parseSIPMessage(self, dataBuffer):
     '''Parse sip message from the data buffer represented as bytes object
@@ -1342,7 +1340,6 @@ class SipParser(object):
     return msg
 
   def parseFirstLine(self, str):
-
     result = None
 
     methodNames = Sip.getMethodNames()
@@ -1408,7 +1405,6 @@ class SipParser(object):
     return result
 
 class AddressFactory(object):
-
   @staticmethod
   def createUri(str):
     result = None
@@ -1448,7 +1444,6 @@ class HeaderFactory(object):
 
   @staticmethod
   def createHeaderFromData(name, body):
-
     id = name.lower()
 
     if name in HeaderFactory.COMPACT_FORMS:
@@ -2086,7 +2081,6 @@ class UnitTestCase(unittest.TestCase):
     SipUtils.generateBranchId()
 
   def testMessageFactory(self):
-
     user1 = SipAddress()
     user1Uri = SipUri()
     user1Uri.setScheme(Uri.SCHEME_SIP)
@@ -2110,7 +2104,15 @@ class UnitTestCase(unittest.TestCase):
     inv = MessageFactory.createRequestInvite(user1, user2, localHop)
 
     ack = MessageFactory.createRequestAck(inv)
- 
+
+  def testSipMessageParserContactHeader(self):
+    sipParser = SipParser()
+    h = sipParser.parseHeader("Contact: \"Mr. Watson\" <sip:watson@worcester.bell-telephone.com>;q=0.7; expires=3600, \"Mr. Watson\" <mailto:watson@bell-telephone.com> ;q=0.1")
+    print(h)
+    print(str(h.getAddress()))
+    for param in h.keys():
+      print(h[param]);
+
   def testSipMessageParserOptions(self):
     f = open('data/sip_options.txt', 'rb')
     msg = f.read()

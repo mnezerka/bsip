@@ -2,7 +2,7 @@
 import logging
 import sipmessage
 import unittest
-import Queue
+import queue
 import socket
 import select
 import threading
@@ -230,8 +230,12 @@ class SipListeningPoint(SipProcessor):
     createTransactions = self._sipStack[SipStack.PARAM_CREATE_TRANSACTIONS]
     if createTransactions is None:
       createTransactions = True 
+    logger.debug('value of parameter %s: %s', SipStack.PARAM_CREATE_TRANSACTIONS, str(createTransactions))
 
-    logger.debug('getting parameter %s: %s', SipStack.PARAM_CREATE_TRANSACTIONS, str(createTransactions))
+    createDialogs = self._sipStack[SipStack.PARAM_CREATE_DIALOGS]
+    if createDialogs is None:
+      createDialogs = True 
+    logger.debug('getting parameter %s: %s', SipStack.PARAM_CREATE_DIALOGS, str(createDialogs))
 
     # prepare response event
     if isinstance(msg, sipmessage.SipRequest):
@@ -518,7 +522,7 @@ class IpNetworkThread(threading.Thread):
 
       try:
         (in_, out_, exc_) = select.select(inputSockets, [] , [], 1)
-      except select.error, e:
+      except e:
         logger.debug('Network error (select failed)')
         break 
 
@@ -1665,6 +1669,71 @@ class SipServerTransaction(SipTransaction):
 
     logger.debug('sendResponse() Leave')
 
+
+
+class SipDialog():
+  """A dialog represents a peer-to-peer SIP relationship between two user agents
+
+  Dialogs are typically used by user agents to
+  facilitate management of state. Dialogs are typically not relevant to proxy
+  servers. The dialog facilitates sequencing of messages between the user
+  agents and proper routing of requests between both of them. The dialog
+  represents a context in which to interpret SIP Transactions and Messages.
+  However, a Dialog is not necessary for message processing.
+
+  A dialog is identified at each User Agent with a dialog Id, which consists of:
+   - Call-Id value
+   - local tag
+   - remote tag.
+
+  The dialog Id at each User Agent involved in the dialog is not the same.
+  Specifically, the local tag at one User Agent is identical to the remote tag
+  at the peer User Agent. The tags are opaque tokens that facilitate the generation
+  of unique dialog Ids.
+  """ 
+
+  LOGGER_NAME = 'SipDialog'
+
+  def __init__(self, sipStack):
+    self._dialogId = None 
+    self._callId = None
+    self._localTag = None
+    self._remotetag = None
+    self._localSequenceNumber = None
+    self._remoteSequenceNumber = None
+    self._localUri = None
+    self._remoteUri = None
+    self._routeList = None
+    self._originalRequest = None
+    self._state = None
+
+  def getState(self):
+    """Returns the current state of the transaction."""
+    return self._state
+
+  def setState(self, state):
+    """Sets new state of the transaction"""
+
+    logger = logging.getLogger(self.LOGGER_NAME)
+    logger.debug('setState(), branch=%s,  %s => %s' % (self._branch, self._state, state))
+    self._state = state
+
+
+
+  def getDialogId(self):
+    return self._dialogId
+
+  def getRouteSet(self):
+    pass
+
+  def createAck(cseq):
+    '''Creates an ACK request for an Invite that was responded with 2xx
+    response. The cseq number for the invite is supplied to relate the ACK to
+    its original invite request.
+    '''
+    pass
+
+
 ###### authentication and authorization stuff ########################################
 class DigestAuthenticator(SipInterceptor):
   """A helper class that provides useful functionality for clients that need to authenticate with servers.
@@ -1717,7 +1786,7 @@ class DigestAuthenticator(SipInterceptor):
 
     # increment cseq
     cSeq = request.getHeaderByType(SipCSeqHeader)
-    cSeq.setSeqNumber(cSeq.getSeqNumber() + 1l)
+    cSeq.setSeqNumber(cSeq.getSeqNumber() + 1)
 
     # set new tag and branch to avoid of interaction with old transaction(s)
     fromHeader.setTag(SipUtils.generateTag())
@@ -1809,7 +1878,7 @@ class DigestAuthenticator(SipInterceptor):
 #   result.setNonce(authParams[Header.PARAM_NONCE])
 #   result.setUri(authParams[Header.PARAM_URI])
 #   result.setResponse(response)
-#     
+#
 #   if not authParams[Header.PARAM_ALGORITHM] is None:
 #     result.setAlgorithm(authParams[Header.PARAM_ALGORITHM])
 #
@@ -1838,7 +1907,7 @@ class DigestAuthenticator(SipInterceptor):
     authHeader.setNonce(authParams[Header.PARAM_NONCE])
     authHeader.setUri(authParams[Header.PARAM_URI])
     authHeader.setResponse(response)
-      
+
     if not authParams[Header.PARAM_ALGORITHM] is None:
       authHeader.setAlgorithm(authParams[Header.PARAM_ALGORITHM])
 
@@ -1915,7 +1984,7 @@ class DigestAuthenticator(SipInterceptor):
           logger.debug("realm %s found in cache" % realm)
           authParams = allRealmAuthParams[realm]
           authParams[Header.PARAM_NC] = authParams[Header.PARAM_NC] + 1
-          
+
           user = authParams["user"]
 
           response = MessageDigestAlgorithm.calculateResponse(
@@ -1939,7 +2008,7 @@ class MessageDigestAlgorithm(object):
   """
 
   LOGGER_NAME = 'message_digest_algorithm' 
-    
+
   @staticmethod
   def calculateResponse(algorithm, hashUserNameRealmPasswd, nonce_value, nc_value, cnonce_value, method, digest_uri_value, entity_body, qop_value):
     """
@@ -1981,7 +2050,7 @@ class MessageDigestAlgorithm(object):
     # digest as specified by rfc2617
     if cnonce_value is None or len(cnonce_value) == 0:
       raise EInvalidArgument('cnonce_value may not be absent for MD5-Sess algorithm.')
-     
+
     A2 = None
     if qop_value is None or len(qop_value.strip()) == 0 or qop_value.strip().lower() == 'auth':
       A2 = method + ":" + digest_uri_value
@@ -2012,5 +2081,19 @@ class MessageDigestAlgorithm(object):
     """Defined in rfc 2617 as KD(secret, data) = H(concat(secret, ":", data))"""
 
     return MessageDigestAlgorithm.H(secret + ':' + data)
+
+
+##### unit test cases #########################################################################
+
+class UnitTestCase(unittest.TestCase):
+  def testDialog(self):
+    d = SipDialog(None)
+
+def suite():
+  suite = unittest.TestLoader().loadTestsFromTestCase(UnitTestCase)
+  return suite
+
+if __name__ == '__main__':
+  unittest.TextTestRunner(verbosity=2).run(suite())
 
 
