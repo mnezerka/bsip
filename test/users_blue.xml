@@ -1,0 +1,20 @@
+<accounts>
+
+  <account>
+    <sip-uri>sip:blue1@blue.home.net</sip-uri>
+    <display-name>Blue 1</display-name>
+    <net-addr>10.0.0.166:60001</net-addr>
+    <digest-user>blue1@blue.home.net</digest-user>
+    <digest-password>blue1secret</digest-password>
+  </account>
+
+  <account>
+    <sip-uri>sip:blue2@blue.home.net</sip-uri>
+    <display-name>Blue 2</display-name>
+    <net-addr>10.0.0.167:60002</net-addr>
+    <digest-user>blue2@blue.home.net</digest-user>
+    <digest-password>blue2secret</digest-password>
+  </account>
+
+</accounts>
+
