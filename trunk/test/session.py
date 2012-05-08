@@ -11,11 +11,9 @@ from accountmanager import *
 from siptest import SipTest, SipUe
 
 class SyncSession(object):
-
     #def __init__(self, ue1, ue2):
     #   self._ue1 = ue1
     #   self._ue2 = ue2
-        
     def __init__(self):
         self._registered = []
         self._events = deque()
@@ -37,7 +35,6 @@ class SyncSession(object):
                 ueToDereg.setState(SipUe.STATE_DEREGISTER)
 
 class SipUeSessionOrig(SipUe):
-
     def __init__(self, user, sipStack, sync, toBeCalled):
         SipUe.__init__(self, user, sipStack)
         self._sync = sync
@@ -129,9 +126,7 @@ class SipUeSessionOrig(SipUe):
             self.logMsg("de-registration failed")
             self.setState(SipUe.STATE_FINISHED)
 
-
 class SipUeSessionTerm(SipUe):
-
     def __init__(self, user, sipStack, sync):
         SipUe.__init__(self, user, sipStack)
         self._sync = sync
@@ -140,7 +135,6 @@ class SipUeSessionTerm(SipUe):
         self.setState(SipUe.STATE_START)
 
     def processRequest(self, requestEvent):
-
         request = requestEvent.getRequest()
         self.logMsg("incoming request: %s" % (request.getMethod()))
 
@@ -170,9 +164,7 @@ class SipUeSessionTerm(SipUe):
         else:
             self.logMsg("unknown state")
 
-
     def setState(self, newState):
-
         SipUe.setState(self, newState)
 
         if newState == SipUe.STATE_START:
@@ -189,12 +181,17 @@ class SipUeSessionTerm(SipUe):
         elif newState == SipUe.STATE_INVITED:
             self.logMsg("invited")
             inviteServerTransaction = self.inviteRequestEvent.getServerTransaction()
-            responseOk = MessageFactory.createResponse(SipResponse.RESPONSE_OK, inviteServerTransaction.getOriginalRequest())
-            toHeader = responseOk.getHeaderByType(SipToHeader);
-            tag = SipUtils.generateTag()
-            toHeader.setTag(tag)
-            self.logMsg("sending 200 OK")
-            inviteServerTransaction.sendResponse(responseOk)
+            dialog = self.getSipStack().createDialog(inviteServerTransaction.getOriginalRequest())
+
+            #responseOk = MessageFactory.createResponse(SipResponse.RESPONSE_OK, inviteServerTransaction.getOriginalRequest())
+            #dialog = self.getSipStack().createDialog(responseOk)
+
+            #toHeader = responseOk.getHeaderByType(SipToHeader);
+            #tag = SipUtils.generateTag()
+            #toHeader.setTag(tag)
+            #dialog = self.getSipStack().createDialog(responseOk)
+            #self.logMsg("sending 200 OK")
+            #inviteServerTransaction.sendResponse(responseOk)
 
         elif newState == SipUe.STATE_DEREGISTER:
             dereg = MessageFactory.createRequestDeRegister(self.registerRequest)
