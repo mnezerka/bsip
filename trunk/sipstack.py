@@ -2,7 +2,6 @@
 import logging
 import sipmessage
 import unittest
-import Queue
 import socket
 import select
 import threading
@@ -10,6 +9,11 @@ import logging
 import time
 import hashlib
 import copy
+
+try:
+    import queue
+except ImportError:
+    import Queue as queue
 
 from sipmessage import *
 #from accountmanager import *
@@ -1761,14 +1765,14 @@ class SipDialog():
 
 	def createResponse(self, statusCode):
 		'''Creates new response which is part of dialog'''
-   		response = MessageFactory.createResponse(statusCode, self._firstRequest)
+		response = MessageFactory.createResponse(statusCode, self._firstRequest)
 		# prepare tags
 		toHeader = response.getHeaderByType(SipToHeader)
 		toHeader.setTag(tag)
 
+		# copy Record-Route headers (order must be preserved)
+
 		# prepare route list 
-
-
 
 		return response
 
