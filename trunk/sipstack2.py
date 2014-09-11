@@ -8,14 +8,9 @@ import logging
 import time
 import hashlib
 import copy
-
-try:
-    import queue
-except ImportError:
-    import Queue as queue
+import sys
 
 from sipmessage import *
-#from accountmanager import *
 
 #### exceptions ###########################################
 class ESipStackException(Exception):
@@ -170,7 +165,7 @@ class SipListeningPoint():
 class SipStack():
     """This class represents the SIP protocol stack."""
 
-    LOGGER_NAME = 'sip_stack'
+    LOGGER_NAME = 'bsip.stack'
 
     STATE_STOPPED = 0
     STATE_RUNNING = 1
@@ -178,29 +173,26 @@ class SipStack():
     def __init__(self):
         self._state = self.STATE_STOPPED
         self._listeningPoints = {}
-
-        # configure logging
-        logging.basicConfig(level=logging.DEBUG, filename="sipstack", filemode="w")
+        self._logger = logging.getLogger(self.LOGGER_NAME)
 
     def start(self):
         """This method initiates the active processing of the stack."""
 
-        logger = logging.getLogger(self.LOGGER_NAME)
-        logger.debug('start() Enter')
-
         self._state = SipStack.STATE_RUNNING
 
-        logger.debug('start() Leave')
+        # main loop
+        self._logger.debug('entering main loop')
+        while self._state == SipStack.STATE_RUNNING:
+            sys.stdout.write('.')
+            time.sleep(0.1)
+
+        self._logger.debug('stopped')
 
     def stop(self):
         """This methods initiates the shutdown of the stack."""
 
-        logger = logging.getLogger(self.LOGGER_NAME)
-        logger.debug('stop() Enter')
-
+        self._logger.debug('stopping')
         self._state = SipStack.STATE_STOPPED
-
-        logger.debug('stop() Leave')
 
     def getState(self):
         return self._state
@@ -214,44 +206,78 @@ class SipStack():
         if not key in self._listeningPoints.keys():
             self._listeningPoints[key] = listeningPoint
 
-##### unit test cases #########################################################################
+    def sendRequest(self, request, transport = "udp"):
+		"""Sends the Request statelessly, that is no transaction record is associated with
+		 this action. This method implies that the application is functioning as a stateless proxy,
+		 hence the underlying SipProvider acts statelessly. A stateless proxy simply forwards every
+		 request it receives downstream and discards information about the Request message once
+		 the message has been forwarded. A stateless proxy does not have any notion of a transaction.
 
-class UnitTestCase(unittest.TestCase):
-    def testSetUp(self):
-        self.localHop = Hop()
-        self.localHop.setHost('127.0.0.1')
-        self.localHop.setPort(5060)
+		Once the Request message has been passed to this method, the SipProvider will forget about this
+		Request. No transaction semantics will be associated with the Request and the SipProvider
+		will not handle retranmissions for the Request. If these semantics are required it is the
+		responsibility of the application not the SipProvider.
+		"""
 
-        self.user1 = SipAddress()
-        self.user1Uri = SipUri()
-        self.user1Uri.setScheme(Uri.SCHEME_SIP)
-        self.user1Uri.setUser("bob")
-        self.user1Uri.setHost("beloxi.com")
-        self.user1.setDisplayName('Bob')
-        self.user1.setUri(self.user1Uri)
+		logger = logging.getLogger(self.LOGGER_NAME)
+		logger.debug('sendRequest() Enter')
 
-        self.user2 = SipAddress()
-        self.user2Uri = SipUri()
-        self.user2Uri.setScheme(Uri.SCHEME_SIP)
-        self.user2Uri.setUser("alice")
-        self.user2Uri.setHost("atlanta.com")
-        self.user2.setDisplayName('Atlanta')
-        self.user2.setUri(self.user2Uri)
+		# get top via header 
+		topVia = request.getTopmostViaHeader()
 
-    def testStackStartStop(self):
-        s = SipStack()
-        s.start()
-        s.stop()
+		# transport from top most via header has higher preference than parameter of this method call
+		if not topVia is None:
+			transport = topVia.getTransport()
 
-    def testStackAddListeningPoint(self):
-        localHop = Hop()
-        localHop.setHost('127.0.0.1')
-        localHop.setPort(5060)
+		# find net element where to send request
+		nextHop = self.getNextHop(request);
+		if nextHop is None:
+			raise ETransactionUnavailable('Cannot resolve next hop -- transaction unavailable')
 
-        s = SipStack()
-        lp = SipListeningPoint(self, localHop)
-        s.addListeningPoint(lp)
+		# modify transport protocol if necessary
+		if transport == Sip.TRANSPORT_UDP and len(str(request)) > SipStack.MESSAGE_MAX_LENGTH:
+			transport = Sip.TRANSPORT_TCP
+			topVia.setTransport(transport)
 
-if __name__ == '__main__':
-    unittest.main()
+		logger.debug('next hop identified, transport is %s, hop is %s', transport, str(nextHop))
+
+		# look for listening point to be used for sending a message
+		lp = self.getListeningPointForViaHeader(topVia)
+		if lp is None:
+			lp = self.getListeningPointForTransport(transport)
+		if lp is None:
+			lp = self.getListeningPointForTransport()
+		if lp is None:
+			raise ESipStackNoListeningPoint('No listening point available')
+
+		self.fixViaHeaders(request, lp)
+
+		# notify all interceptors
+		for si in self._sipInterceptors:
+			si.onMessageSend(request)
+
+		message = str(request)
+
+		localIpAddress = lp.getHop().getHost()
+		localPort = lp.getHop().getPort()
+
+		logger.debug('	local address: %s', localIpAddress)
+		logger.debug('	local port: %d', localPort)
+		logger.debug('	dst IP: %s', nextHop.getHost())
+		logger.debug('	dst port: %d', nextHop.getPort())
+		logger.debug('	msg length: %d', len(message))
+		logger.debug('	transport: %s', transport)
+
+		logger.debug('sending message:\n------\n%s\n-------', message)
+
+		ipDispatcher = self.getIpDispatcher()
+		ipDispatcher.sendSync(
+			localIpAddress,
+			0,
+			nextHop.getHost(),
+			nextHop.getPort(),
+			message,
+			transport)
+
+		logger.debug('sendRequest() Leave')
 
