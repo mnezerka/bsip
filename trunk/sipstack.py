@@ -1,4 +1,3 @@
-
 import logging
 import sipmessage
 import unittest
@@ -18,6 +17,7 @@ except ImportError:
 from sipmessage import *
 #from accountmanager import *
 
+#### exceptions ###########################################
 class ESipStackException(Exception):
 	pass
 
@@ -494,7 +494,6 @@ class IpNetworkThread(threading.Thread):
 		
 		self.__running = False
 		self.__syncEvent.set()
-
  
 	def run(self):
 		logger = logging.getLogger(self.LOGGER_NAME)
@@ -504,7 +503,6 @@ class IpNetworkThread(threading.Thread):
 		self.__running = True 
 
 		while self.__running:
-
 			logger.debug('Main loop iteration')
 			
 			# we have nothing to do with empty list of sockets
