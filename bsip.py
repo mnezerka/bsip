@@ -1,11 +1,13 @@
 # sip client
 
+# tip: http://pymotw.com/2/cmd/
+
 import logging
 import threading
 import sipstack2
 import sipmessage
 import time
-
+import cmd
 
 class SipStackThread(threading.Thread):
     LOGGER_NAME = 'sipStackThread'
@@ -20,7 +22,42 @@ class SipStackThread(threading.Thread):
 
     def stop(self):
         self.__sipStack.stop()
-            
+
+class BSip(cmd.Cmd):
+    """BSip command line processor"""
+
+    def __init__(self):
+        cmd.Cmd.__init__(self)
+        # initialize logging
+        self.logger = logging.getLogger('bsip')
+        self.logger.setLevel(logging.DEBUG)
+        h = logging.FileHandler(filename='bsip.log', mode='w')
+        h.setLevel(logging.DEBUG)
+        f = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', '%d/%m/%Y %H:%M:%S')
+        h.setFormatter(f)
+        self.logger.addHandler(h)
+        self.logger.debug('Logging initialized')
+
+        #localHop = sipmessage.Hop()
+        #localHop.setHost('127.0.0.1')
+        #localHop.setPort(5060)
+
+        self.stack = sipstack2.SipStack()
+        self.stackThread = SipStackThread(self.stack)
+        self.stackThread.start()
+        #time.sleep(1)
+        #st.stop()
+        #lp = SipListeningPoint(self, localHop)
+        #s.addListeningPoint(lp)
+
+    def do_greet(self, line):
+        print "hello"
+
+    def do_exit(self, line):
+        self.stackThread.stop()
+        """Quit BSip application"""
+        return True
+             
 def main():
 
     # initialize logging
@@ -47,5 +84,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+
+    BSip().cmdloop()
+    #main()
 

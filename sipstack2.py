@@ -183,7 +183,7 @@ class SipStack():
         # main loop
         self._logger.debug('entering main loop')
         while self._state == SipStack.STATE_RUNNING:
-            sys.stdout.write('.')
+            #sys.stdout.write('.')
             time.sleep(0.1)
 
         self._logger.debug('stopped')
