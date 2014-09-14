@@ -16,7 +16,7 @@ class ESipMessageNotImplemented(ESipMessageException):
 class ESipMessageHeaderInvalid(ESipMessageException):
     pass
 
-class Sip(object):
+class Sip():
     '''General SIP protocol definitions'''
 
     # cookie that should be used as a prefix for all branch hashes
@@ -44,7 +44,7 @@ class Sip(object):
     RESPONSE_UNAUTHORIZED = 401
     RESPONSE_PROXY_AUTHENTICATION_REQUIRED = 407
 
-class SipUtils(object):
+class SipUtils():
     DIGEST_POOL_SIZE = 20
 
     @staticmethod
@@ -347,7 +347,7 @@ class SipUri(Uri):
         
         return result 
 
-class SipAddress(object):
+class SipAddress():
     """This class represents a user's display name and URI address. The display name of
     an address is optional but if included can be displayed to an end-user. The address
     URI (most likely a SipURI) is the user's address. For example a 'To' address of
@@ -415,7 +415,7 @@ class SipAddress(object):
             result = '"' + self._displayName + '" <' + str(self._uri) + '>'
         return result
 
-class Hop(object):
+class Hop():
     """Network address (host, port, transport) in format host[:port][;transport=udp|tcp]"""
     def __init__(self, addr = None, transport = None):
         self._host = None
@@ -465,7 +465,7 @@ class Hop(object):
 
 ######## headers ################3
 
-class MediaType(object):
+class MediaType():
     """This class represents media type methods for any header that contain content type and content sub-type values."""
 
     def __init__(self, body = None):
@@ -502,14 +502,13 @@ class MediaType(object):
             result = self._contentType + '/' + self._contentSubType
         return result
 
-class Header(object):
+class Header():
     PARAM_ACTION = 'action';
     PARAM_ALERT = 'alert';
     PARAM_ALGORITHM = 'algorithm';
     PARAM_BRANCH = 'branch';
     PARAM_CARD = 'card';
     PARAM_CAUSE = 'cause';
-    # If the server sent a qop-header in the WWW-Authenticate header, the client has to provide this value for HTTP digest auth. See the RFC for more details.
     PARAM_CNONCE = 'cnonce';
     PARAM_COOKIE = 'cookie';
     PARAM_DIGEST = 'Digest';
@@ -525,13 +524,10 @@ class Header(object):
     PARAM_MADDR = 'maddr';
     PARAM_NC = 'nc';
     PARAM_NEXT_NONCE = 'nextnonce';
-    # The nonce the server sent for digest auth, sent back by the client. A nonce should be unique for every 401 response for HTTP digest auth.
     PARAM_NONCE = 'nonce';
-    # The nonce count value transmitted by clients if a qop-header is also transmitted. HTTP digest auth only.
     PARAM_NONCE_COUNT = 'nc';
     PARAM_NON_URGENT = 'non-urgent';
     PARAM_NORMAL = 'normal';
-    # The opaque header from the server returned unchanged by the client. It is recommended that this string be base64 or hexadecimal data. Digest auth only.
     PARAM_OPAQUE = 'opaque';
     PARAM_OPTIONAL = 'optional';
     PARAM_PASSWORD = 'password';
@@ -1256,9 +1252,7 @@ class ProxyAuthenticateHeader(AuthenticationHeader):
     def __init__(self, body = None):
         AuthenticationHeader.__init__(self, 'Proxy-Authenticate', body)
 
-###### sip messsage parser ############################################################
-
-class SipParser(object):
+class SipParser():
     @staticmethod
     def parseListHeader(value):
         """Parse lists as described by RFC 2068 Section 2.
@@ -1414,7 +1408,7 @@ class SipParser(object):
 
         return result
 
-class AddressFactory(object):
+class AddressFactory():
     @staticmethod
     def createUri(str):
         result = None
@@ -1427,7 +1421,7 @@ class AddressFactory(object):
 
         return result
 
-class HeaderFactory(object):
+class HeaderFactory():
     HEADER_NAMES = {
         'authentication-info' : AuthenticationInfoHeader,
         'from' : SipFromHeader,
@@ -1491,9 +1485,7 @@ class HeaderFactory(object):
 
         return result
 
-###### sip messsage ############################################################
-
-class SipMessage(object):
+class SipMessage():
     def __init__(self):
         self.__headers = []
         self.__content = None
@@ -1805,7 +1797,7 @@ class SipResponse(SipMessage):
     def getFirstLine(self):
         return 'SIP/2.0 ' + str(self._statusCode) + ' ' + str(self._reasonPhrase)
 
-class MessageFactory(object):
+class MessageFactory():
     @staticmethod
     def createRequest(requestUri = None, method = None):
         """Creates a new Request message"""

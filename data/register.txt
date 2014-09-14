@@ -1,0 +1,13 @@
+REGISTER sip:brn38.iit.ims SIP/2.0
+Via: SIP/2.0/UDP 64.2.190.2:10001;branch=z9hG4bKaioerknw
+From: ITSY000001 <sip:ITSY000001@brn38.iit.ims>;tag=z9hG4bKvlxhgxrt
+To: ITSY000001 <sip:ITSY000001@brn38.iit.ims>
+Call-ID: 5364515643@64.2.190.2
+CSeq: 1 REGISTER
+Contact: <sip:64.2.190.2:10001>
+Max-Forwards: 70
+User-Agent: IMS 7.x SIP TestClient
+Expires: 1900
+Content-Length: 0
+Authorization: Digest username="ITSY000001.priv@brn38.iit.ims",realm="brn38.iit.ims",uri="sip:brn38.iit.ims",nonce="",response=""
+
