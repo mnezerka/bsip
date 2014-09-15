@@ -85,6 +85,9 @@ class IpDispatcher():
         """Run select on registered sockets"""
 
         socketsInput = self.socketsClient + self.socketsListening
+
+        if len(socketsInput) == 0:
+            return
         
         self.logger.debug('select iteration for %d sockets', len(socketsInput))
 
