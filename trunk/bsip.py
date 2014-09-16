@@ -4,7 +4,7 @@
 
 import logging
 import threading
-import sipstack2
+import sipstack
 import sipmessage
 import time
 import cmd
@@ -23,7 +23,7 @@ class SipStackThread(threading.Thread):
     def stop(self):
         self.__sipStack.stop()
 
-class SipModulePrint(sipstack2.Module):
+class SipModulePrint(sipstack.Module):
     """Print module"""
 
     def __init__(self):
@@ -31,7 +31,7 @@ class SipModulePrint(sipstack2.Module):
         # module name
         self.name = 'bsip-print-module' 
         # module priority
-        self.priority = sipstack2.Module.PRIO_APPLICATION
+        self.priority = sipstack.Module.PRIO_APPLICATION
 
     # Called on rx request
     def onRxRequest(self, rxData):
@@ -71,14 +71,14 @@ class BSip(cmd.Cmd):
         #localHop = sipmessage.Hop()
         #localHop.setHost('127.0.0.1')
         #localHop.setPort(5060)
-        #lp = sipstack2.SipListeningPoint(self, localHop)
+        #lp = sipstack.SipListeningPoint(self, localHop)
 
-        self.stack = sipstack2.SipStack()
+        self.stack = sipstack.SipStack()
         self.stackThread = SipStackThread(self.stack)
         self.stackThread.start()
 
-        self.tranUdp = sipstack2.TransportUdp(self.stack, '127.0.0.1', 5060)
-        self.tranLoopback = sipstack2.TransportLoopback(self.stack)
+        self.tranUdp = sipstack.TransportUdp(self.stack, '127.0.0.1', 5060)
+        self.tranLoopback = sipstack.TransportLoopback(self.stack)
 
         self.stack.registerModule(SipModulePrint())
 
