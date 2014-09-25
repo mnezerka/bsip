@@ -474,7 +474,62 @@ class Hop():
 
         return result
 
-######## headers ################3
+######## user management ########
+
+class User():
+    def __init__(self):
+        self._address = None
+        self._hop = None
+        self._digestUserName = None
+        self._digestPassword = None
+        self._proxy = None
+
+    def setAddress(self, address):
+        self._address = address
+
+    def getAddress(self):
+        return self._address
+
+    def setUri(self, uri):
+        self._address.setUri(uri)
+
+    def getUri(self):
+        return self._address.getUri() if not self._address is None else None
+
+    def setHop(self, hop):
+        self._hop = hop
+
+    def getHop(self):
+        return self._hop    
+
+    def getDigestUser(self):
+        """Returns the name of the user that these credentials relate to."""
+        return self._digestUser
+
+    def setDigestUser(self, name):
+        self._digestUser = name 
+
+    def getDigestPassword(self):
+        """Returns a password associated with this set of credentials."""
+        return self._digestPassword
+
+    def setDigestPassword(self, password):
+        self._digestPassword = password
+
+    def getDigestHash(self):
+        """Get the MD5(userName:sipdomain:password)"""
+        p = self._digestUser + ':' + self._address.getUri().getHost() + ':' + self._digestPassword
+        m = hashlib.md5()
+        m.update(p)
+        return m.hexdigest()
+
+    def setProxy(self, proxy):
+        self.proxy = proxy
+
+    def getProxy(self):
+        return self.proxy
+
+######## headers ################
 
 class MediaType():
     """This class represents media type methods for any header that contain content type and content sub-type values."""
@@ -1833,8 +1888,8 @@ class MessageFactory():
         return response
 
     @staticmethod
-    def createRequestRegister(user, hop):
-        if not isinstance(user, SipAddress) or not isinstance(hop, Hop):
+    def createRequestRegister(user):
+        if not isinstance(user, SipAddress):
             raise ESipMessageException("Invalid argument format")
 
         requestUri = SipUri('sip:%s' % user.getUri().getHost())
@@ -1851,38 +1906,28 @@ class MessageFactory():
         toHeader.setAddress(user)
         result.addHeader(toHeader)
 
-        result.addHeader(SipCallIdHeader(SipUtils.generateCallIdentifier(hop.getHost())))
+        #result.addHeader(SipCallIdHeader(SipUtils.generateCallIdentifier(hop.getHost())))
 
         result.addHeader(SipCSeqHeader('1 REGISTER'))
-        viaHeader = SipViaHeader()
-        viaHeader.setTransport(hop.getTransport())
-        viaHeader.setHost(hop.getHost())
-        viaHeader.setPort(hop.getPort())
-        viaHeader.setBranch(SipUtils.generateBranchId());
-        result.addHeader(viaHeader)
+        #viaHeader = SipViaHeader()
+        #viaHeader.setTransport(hop.getTransport())
+        #viaHeader.setHost(hop.getHost())
+        #viaHeader.setPort(hop.getPort())
+        #viaHeader.setBranch(SipUtils.generateBranchId());
+        #result.addHeader(viaHeader)
         result.addHeader(MaxForwardsHeader('70'))
         result.addHeader(ExpiresHeader('3600'))
 
-        contactUri = SipUri()
-        contactUri.setScheme(Uri.SCHEME_SIP)
-        contactUri.setHost(hop.getHost());
-        contactUri.setPort(hop.getPort());
-        contactHeader = ContactHeader()
-        contactHeader.setAddress(contactUri)
-        result.addHeader(contactHeader);
+        #contactUri = SipUri()
+        #contactUri.setScheme(Uri.SCHEME_SIP)
+        #contactUri.setHost(hop.getHost());
+        #contactUri.setPort(hop.getPort());
+        #contactHeader = ContactHeader()
+        #contactHeader.setAddress(contactUri)
+        #result.addHeader(contactHeader);
 
         contentLengthHeader = ContentLengthHeader(0)
         result.addHeader(contentLengthHeader);
-
-        # create authorization header
-        #authorizationHeader = AuthorizationHeader()
-        #authorizationHeader.setScheme('Digest')
-        #authorizationHeader.setUserName(user.getAuthUserName())
-        #authorizationHeader.setRealm(user.getSipDomain())
-        #authorizationHeader.setUri(str(requestUri))
-        #authorizationHeader.setNonce('')
-        #authorizationHeader.setResponse('')
-        #result.addHeader(authorizationHeader)
         
         return result
 
@@ -1989,6 +2034,163 @@ class MessageFactory():
         result.addHeader(cSeqHeader)
         return result
 
+######## transactions ################
+
+class SipTransaction(object):
+	"""Transactions base
+    
+    This interface represents a generic transaction interface defining the methods common
+	between client and server transactions."""
+
+	def __init__(self, sipStack, originalRequest, lp = None):
+		self.branch = None
+
+		self.originalRequest = originalRequest 
+		self.stack = sipStack
+		self.transport = transport # transport used for sending/receiving transaction messages
+
+class SipTransactionClientNonInvite(SipTransaction):
+	""" Client transaction"""
+
+	LOGGER_NAME = 'SipClientTransaction'
+
+	def __init__(self, sipStack, request, lp = None):
+		SipTransaction.__init__(self, sipStack, request, lp)
+
+	def sendAck(self):
+		"""Creates a new Ack message from the Request associated with this client transaction."""
+		logger = logging.getLogger(self.LOGGER_NAME)
+		logger.debug('sendAck() Enter')
+
+		ackRequest = MessageFactory.createRequestAck(self.getOriginalRequest())
+		self._sipStack.sendRequest(ackRequest)
+
+		logger.debug('sendAck() Leave')
+
+	def createCancel(self):
+		"""Creates a new Cancel message from the Request associated with this client transaction."""
+		raise ENotImplemented()
+
+	def sendRequest(self, request = None):
+		"""Sends the Request which created this ClientTransaction.
+
+		When an application wishes to send a Request message,
+		it creates a Request and then creates a new ClientTransaction
+		by call to createClientTransaction. Calling this method
+		on the ClientTransaction sends the Request onto the network. 
+
+		This method assumes that the Request is sent out of Dialog. It uses the Router to determine the next hop.
+		If the Router returns a empty iterator, and a Dialog is associated with the outgoing request of the Transaction
+		then the Dialog route set is used to send the outgoing request.
+		"""
+
+		logger = logging.getLogger(self.LOGGER_NAME)
+		logger.debug('sendRequest() Enter')
+
+		#if not self.getState() is None:
+		# raise ESipStackInvalidState('Request already sent')
+
+		request = request if not request is None else self.getOriginalRequest()
+
+		# set the branch id for the top via header.
+		topVia = request.getTopmostViaHeader()
+		topVia.setBranch(self.getBranch());
+
+		# if this is not the first request for this transaction,
+		if self.getState() in [SipTransaction.TRANSACTION_STATE_PROCEEDING, SipTransaction.TRANSACTION_STATE_CALLING]:
+
+			# if this is a TU-generated ACK request,
+			if request.getMethod() == SipRequest.METHOD_ACK:
+
+				# send directly to the underlying transport and close this transaction
+				#if self.isReliable():
+				self.setState(SipTransaction.TRANSACTION_STATE_TERMINATED)
+				self._sipStack.sendRequest(request);
+
+				#else:
+				# self.setState(SipTransaction.TRANSACTION_STATE_COMPLETED)
+
+				#self.cleanUpOnTimer()
+			else:
+				self.sipStack.sendRequest(request);
+
+		# if this is the FIRST request for this transaction,
+		elif self.getState() is None: 
+
+			# Save this request as the one this transaction is handling 
+			#self.setRequest(message); 
+
+			# change to trying/calling state 
+			# set state first to avoid race condition.. 
+			if request.getMethod() == SipRequest.METHOD_INVITE:
+				self.setState(SipTransaction.TRANSACTION_STATE_CALLING) 
+			elif request.getMethod() == SipRequest.METHOD_ACK:
+				# Acks are never retransmitted. 
+				self.setState(SipTransaction.TRANSACTION_STATE_TERMINATED)
+				# TODO: cleanUpOnTimer(); 
+			else:
+				self.setState(SipTransaction.TRANSACTION_STATE_TRYING); 
+
+			#TODO if not self.isReliable():
+			#TODO self.enableRetransmissionTimer() 
+			# TODO Enable appropriate timers
+			
+			self._sipStack.sendRequest(request);
+
+		logger.debug('sendRequest() Leave')
+
+	def processResponse(self, response):
+		logger = logging.getLogger(self.LOGGER_NAME)
+		logger.debug('processResponse() Enter in state %s' % self.getState())
+
+		blockListeners = False 
+
+		state = self.getState()
+		invTransaction = self.getOriginalRequest().getMethod() == SipRequest.METHOD_INVITE
+
+		# 100 - 199 handle provisioning response
+		if response.getStatusCode() >= 100 and response.getStatusCode() <= 199:
+			if state in [SipTransaction.TRANSACTION_STATE_CALLING, SipTransaction.TRANSACTION_STATE_TRYING, SipTransaction.TRANSACTION_STATE_PROCEEDING]:
+				self.setState(SipTransaction.TRANSACTION_STATE_PROCEEDING)
+			else:
+				blockListeners = True 
+
+		# 200 - 299 handle ok response
+		elif response.getStatusCode() >= 200 and response.getStatusCode() <= 299:
+			if invTransaction: 
+				if state in [SipTransaction.TRANSACTION_STATE_CALLING, SipTransaction.TRANSACTION_STATE_PROCEEDING]:
+					self.setState(SipTransaction.TRANSACTION_STATE_TERMINATED)
+				else:
+					blockListeners = True 
+			else:
+				if state in [SipTransaction.TRANSACTION_STATE_TRYING, SipTransaction.TRANSACTION_STATE_PROCEEDING]:
+					self.setState(SipTransaction.TRANSACTION_STATE_COMPLETED)
+				else:
+					blockListeners = True 
+
+		# 300 - 699 handle ok response
+		elif response.getStatusCode() >= 300 and response.getStatusCode() <= 699:
+			if invTransaction: 
+				self.sendAck()
+			if state in [SipTransaction.TRANSACTION_STATE_CALLING, SipTransaction.TRANSACTION_STATE_TRYING, SipTransaction.TRANSACTION_STATE_PROCEEDING]:
+				self.setState(SipTransaction.TRANSACTION_STATE_COMPLETED)
+			else:
+				blockListeners = True 
+		else:
+			blockListeners = True 
+
+		if blockListeners:
+			logger.debug('discarding message %s %s', respnse.getStatusCode(), getReasonPhrase())
+
+		logger.debug('processResponse() Leave')
+
+		return blockListeners 
+
+class SipTranClientNonInviteCalling(SipTransaction):
+	"""Implementation of calling state for non-Invite Client transaction state"""
+
+	LOGGER_NAME = 'SipClientTransaction'
+
 ######## stack ####################
 
 class SipRxData():
@@ -2014,6 +2216,8 @@ class SipTxData():
     dest = None
     # transmitted message
     msg = None
+    # transmitted data 
+    data = None
 
 class IpSocketListener():
     """Base abstract class for all listeners to socket events""" 
@@ -2121,6 +2325,7 @@ class Transport:
     """Base class for all transports"""
 
     LOGGER_NAME = 'BSip.Transport' 
+    type = None 
 
     def __init__(self, stack):
         self.stack = stack
@@ -2128,13 +2333,17 @@ class Transport:
     def getId(self):
         return None
 
-    def sendMsg(self, msg):
+    def send(self, txData):
         pass
+
+    def getViaHeader(self):
+        return None
 
 class TransportLoopback(Transport):
     """Loopback transport"""
 
     LOGGER_NAME = 'BSip.TransortLoopback' 
+    type = 'loopback' 
 
     def __init__(self, stack):
         Transport.__init__(self, stack)
@@ -2148,6 +2357,7 @@ class TransportUdp(Transport, IpSocketListener):
     """UDP Socket Transport"""
 
     LOGGER_NAME = 'BSip.TransortUdp' 
+    type = Sip.TRANSPORT_UDP
 
     def __init__(self, stack, localAddress, port):
         Transport.__init__(self, stack)
@@ -2177,9 +2387,29 @@ class TransportUdp(Transport, IpSocketListener):
 
         self.stack.transportManager.onRxData(rxData)
 
+    def send(self, txData):
+        if txData.data is None:
+            self.logger.error('Request to send data, but no binary data available')
+            raise Exception('Request to send data, but no binary data available')
+        self.logger.info('Sending data of size %d to %s' % (len(txData.data), str(txData.dest)))
+        self.logger.debug('Data dump:\n------\n%s\n-------', txData.data)
+
+        sendSock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sendSock.bind((self.localAddress, 0))
+        sendSock.sendto(txData.data, txData.dest)
+        sendSock.close()
+
+    def getViaHeader(self):
+        topVia = SipViaHeader()
+        topVia.setTransport(Sip.TRANSPORT_UDP)
+        topVia.setHost(self.localAddress)
+        topVia.setPort(self.port)
+        return topVia 
+
 class TransportTcp(Transport, IpSocketListener):
     """TCP Socket Transport"""
     LOGGER_NAME = 'BSip.TransportTcp' 
+    type = Sip.TRANSPORT_TCP
 
     def __init__(self, stack, localAddress, port):
         SipTransport.__init__(self, stack)
@@ -2208,10 +2438,15 @@ class Module():
     PRIO_APPLICATION = 64 
 
     def __init__(self):
-        # module name
-        self.name = 'module' 
+
+        self.stack = None 
+
         # module priority
         self.priority = PRIO_TRANSPORT_LAYER
+
+    def getId(self):
+        """Get module id"""
+        return 'module'
 
     # Called to load the module
     def onLoad(self, stack):
@@ -2230,24 +2465,27 @@ class Module():
         pass
 
     # Called on rx request
-    def onRxRequest(rxData):
+    def onRxRequest(self, rxData):
         pass
 
     # Called on rx response
-    def onRxResponse(rxData):
+    def onRxResponse(self, rxData):
         pass
 
     # Called on tx request
-    def onTxRequest(rxData):
+    def onTxRequest(self, txData):
         pass
 
     # Called on tx response
-    def onTxResponse(rxData):
+    def onTxResponse(self, txData):
         pass
 
     # Called on transaction state changed
     def onTsxState(tsx):
         pass
+
+    def onRegistered(self, stack):
+        self.stack = stack
 
 class TransportManager():
     """Responsible for management of all transports"""
@@ -2277,7 +2515,19 @@ class TransportManager():
             logger.debug('parsing failed, adding data to buffer, new buffer length is ...')
 
         self.stack.onRxMessage(rxData)
-        
+
+    def send(self, txData):
+        # check if transport is registered
+        pass
+
+    def acquiureTransport(self, transportType):
+        transport = None
+        for tId in self.transports:
+            if self.transports[tId].type == transportType:
+                transport = self.transports[tId]
+                break
+        return transport
+
 class SipStack():
     """This class represents the SIP protocol stack."""
 
@@ -2328,6 +2578,7 @@ class SipStack():
     def registerModule(self, module):
         self.logger.debug('Registering module %s (priority %d)' % (module.name, module.priority))
         self.modules.append(module)
+        module.onRegistered(self)
 
     def onRxMessage(self, rxData):
         self.logger.debug('Received SIP message')
@@ -2335,7 +2586,9 @@ class SipStack():
         # distribute message to modules according to priorities
         msg = rxData.msg
         consumed = False
+        # 1st loop is over all priorities
         for priority in [Module.PRIO_TRANSPORT_LAYER, Module.PRIO_TRANSACTION_LAYER, Module.PRIO_UA_PROXY_LAYER, Module.PRIO_DIALOG_USAGE, Module.PRIO_APPLICATION]:
+            # 2nd loop is over all modules 
             for m in self.modules:
                 if m.priority == priority:
                     if isinstance(msg, SipRequest):
@@ -2344,13 +2597,48 @@ class SipStack():
                        consumed = m.onRxResponse(rxData)
                     else:
                         raise BSipException('Unknown SIP message type') 
+
                     if consumed: 
                         self.logger.debug('Message consumed by module: %s' % m.getId())
                         break
-                if consumed: 
-                    break
+
+            # exit 1s loop
+            if consumed: 
+                break 
+
+        self.logger.debug(consumed)
         if not consumed:
             self.logger.warning('Message not consumed by any of modules')
+
+    def sendStateless(self, txData):
+        if not txData.transport is None:
+            self.fixViaHeaders(txData)
+            txData.data = str(txData.msg)
+            txData.transport.send(txData)
+        else:
+            raise Exception('no transport selected')
+
+    def fixViaHeaders(self, txData):
+        if txData.transport is None:
+            return
+
+        # get message top via header
+        topVia = txData.msg.getTopmostViaHeader()
+
+        if topVia is None: 
+            self.logger.debug('Adding new Via header generated by listening point')
+            # get transport header
+            transportVia = txData.transport.getViaHeader()
+            txData.msg.addHeader(transportVia)
+            print "This is via header", str(transportVia)
+        else:
+
+            if txData.transport.type != topVia.getTransport():
+                topVia.setTransport(txData.transport.type)
+            if txData.transport.localAddress != topVia.getHost():
+                topVia.setHost(txData.transport.localAddress)
+            if txData.transport.port != topVia.getPort():
+                topVia.setPort(txData.transport.port)
 
     def sendRequest(self, request, transport = "udp"):
         """Sends the Request statelessly, that is no transaction record is associated with
@@ -2426,6 +2714,11 @@ class SipStack():
             transport)
 
         logger.debug('sendRequest() Leave')
+
+    def acquireTransport(self, transportType):
+        return self.transportManager.acquiureTransport(transportType)
+
+######## stack ####################
 
 class UnitTestCase(unittest.TestCase):
     def setUp(self):
@@ -2651,13 +2944,12 @@ class UnitTestCase(unittest.TestCase):
         f.close()
         sipParser = SipParser()
         sipParser.parseSIPMessage(msg) 
-    
+
 def suite():
     suite = unittest.TestLoader().loadTestsFromTestCase(UnitTestCase)
     return suite
 
 if __name__ == '__main__':
     unittest.TextTestRunner(verbosity=2).run(suite())
-
 
 

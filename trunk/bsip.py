@@ -51,6 +51,53 @@ class SipModulePrint(sipstack.Module):
         print '-----------------------------'
         return False
 
+class SipModuleRegistration(sipstack.Module):
+    """Print module"""
+
+    def __init__(self):
+        print "SipModulePrint initialized"
+        # module name
+        self.name = 'bsip-reg-module' 
+        # module priority
+        self.priority = sipstack.Module.PRIO_DIALOG_USAGE
+
+    def getId(self):
+        """Get module id"""
+        return 'reg'
+
+    # Called on rx request
+    def onRxRequest(self, rxData):
+        print '-----------------------------'
+        print 'Received SIP request:'
+        print rxData.msg
+
+        print 'SIP response to be sent::'
+        response = sipstack.MessageFactory.createResponse(200, rxData.msg)
+        #txData.msg = sipstack.MessageFactory.createRequestRegister(user.getAddress())
+
+        print response
+        print '-----------------------------'
+
+        return True 
+
+    # Called on rx response
+    def onRxResponse(self, rxData):
+        print '-----------------------------'
+        print 'Received SIP response:'
+        print rxData.msg
+        print '-----------------------------'
+        return False
+
+    def register(self, user):
+
+        print 'Registering user', user
+
+        txData = sipstack.SipTxData()
+        txData.msg = sipstack.MessageFactory.createRequestRegister(user.getAddress())
+        txData.transport = self.stack.acquireTransport(sipstack.Sip.TRANSPORT_UDP)
+        txData.dest = user.getProxy() 
+        self.stack.sendStateless(txData)
+
 class BSip(cmd.Cmd):
     """BSip command line processor"""
 
@@ -80,7 +127,21 @@ class BSip(cmd.Cmd):
         self.tranUdp = sipstack.TransportUdp(self.stack, '127.0.0.1', 5060)
         self.tranLoopback = sipstack.TransportLoopback(self.stack)
 
+        self.regModule = SipModuleRegistration()
         self.stack.registerModule(SipModulePrint())
+        self.stack.registerModule(self.regModule)
+
+        self.user = sipstack.User()
+        userAddr = sipstack.SipAddress()
+        userAddr.setDisplayName('Bob')
+        self.user.setAddress(userAddr)
+        user1Uri = sipstack.SipUri()
+        user1Uri.setScheme(sipstack.Uri.SCHEME_SIP)
+        user1Uri.setUser("bob")
+        user1Uri.setHost("beloxi.com")
+        self.user.setUri(user1Uri)
+        #self.user.setProxy(('127.0.0.1', 5555))
+        self.user.setProxy(('127.0.0.1', 5060))
 
     def do_greet(self, line):
         print "hello"
@@ -101,13 +162,19 @@ class BSip(cmd.Cmd):
             transports = self.stack.transportManager.transports
             for tId in transports:
                 print tId
+        elif what == 'user':
+            print self.user
         else:
             print 'unknown command'
 
     def do_register(self, userId):
         """Register user"""
-        print "registering user %s" % userId 
-             
+        print "registering user", self.user
+        self.regModule.register(self.user)
+
+    def emptyline(self):
+        pass
+
 if __name__ == '__main__':
     bsip = BSip()
     try:

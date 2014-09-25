@@ -4,7 +4,6 @@ import unittest
 import sipmessage
 
 class AccountManager(object):
-
 	def __init__(self):
 		self._users = []
 		pass
@@ -71,8 +70,8 @@ class AccountManager(object):
 
 					if not user.getUri() is None:
 						self.add(user)
-class User(object):
 
+class User(object):
 	def __init__(self):
 		self._address = None
 		self._hop = None
