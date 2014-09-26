@@ -23,75 +23,30 @@ class SipStackThread(threading.Thread):
     def stop(self):
         self.__sipStack.stop()
 
-class SipModulePrint(sipstack.Module):
-    """Print module"""
-
-    def __init__(self):
-        print "SipModulePrint initialized"
-        # module name
-        self.name = 'bsip-print-module' 
-        # module priority
-        self.priority = sipstack.Module.PRIO_APPLICATION
-
-    # Called on rx request
-    def onRxRequest(self, rxData):
-        print '-----------------------------'
-        print 'Received SIP request'
-        print '-----------------------------'
-        print rxData.msg
-        print '-----------------------------'
-        return False
-
-    # Called on rx response
-    def onRxResponse(self, rxData):
-        print '-----------------------------'
-        print 'Received SIP response'
-        print '-----------------------------'
-        print rxData.msg
-        print '-----------------------------'
-        return False
-
 class SipModuleRegistration(sipstack.Module):
-    """Print module"""
+    """Registration module"""
 
     def __init__(self):
-        print "SipModulePrint initialized"
-        # module name
-        self.name = 'bsip-reg-module' 
-        # module priority
         self.priority = sipstack.Module.PRIO_DIALOG_USAGE
 
     def getId(self):
-        """Get module id"""
         return 'reg'
 
     # Called on rx request
     def onRxRequest(self, rxData):
-        print '-----------------------------'
-        print 'Received SIP request:'
-        print rxData.msg
-
-        print 'SIP response to be sent::'
+        print 'Received SIP request'
+        print 'Sending SIP response'
         response = sipstack.MessageFactory.createResponse(200, rxData.msg)
         #txData.msg = sipstack.MessageFactory.createRequestRegister(user.getAddress())
-
-        print response
-        print '-----------------------------'
-
         return True 
 
     # Called on rx response
     def onRxResponse(self, rxData):
-        print '-----------------------------'
-        print 'Received SIP response:'
-        print rxData.msg
-        print '-----------------------------'
+        print 'Received SIP response'
         return False
 
     def register(self, user):
-
         print 'Registering user', user
-
         txData = sipstack.SipTxData()
         txData.msg = sipstack.MessageFactory.createRequestRegister(user.getAddress())
         txData.transport = self.stack.acquireTransport(sipstack.Sip.TRANSPORT_UDP)
@@ -128,9 +83,10 @@ class BSip(cmd.Cmd):
         self.tranLoopback = sipstack.TransportLoopback(self.stack)
 
         self.regModule = SipModuleRegistration()
-        self.stack.registerModule(SipModulePrint())
         self.stack.registerModule(self.regModule)
 
+        self.stack.registerModule(sipstack.ModuleSipLog())
+        
         self.user = sipstack.User()
         userAddr = sipstack.SipAddress()
         userAddr.setDisplayName('Bob')
