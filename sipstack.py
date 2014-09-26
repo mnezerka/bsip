@@ -1618,7 +1618,7 @@ class SipMessage():
     def getFirstLine(self):
         return ''
 
-    def getTopmostViaHeader(self):
+    def getTopViaHeader(self):
         result = None
         for header in self.__headers:
             if isinstance(header, SipViaHeader):
@@ -1673,7 +1673,7 @@ class SipMessage():
         response have the same computed transaction identifier).
         """
 
-        topVia = self.getTopmostViaHeader()
+        topVia = self.getTopViaHeader()
         cSeqHeader = self.getHeaderByType(SipCSeqHeader)
         fromHeader = self.getHeaderByType(SipFromHeader)
         toHeader = self.getHeaderByType(SipToHeader)
@@ -1918,13 +1918,6 @@ class MessageFactory():
         result.addHeader(MaxForwardsHeader('70'))
         result.addHeader(ExpiresHeader('3600'))
 
-        #contactUri = SipUri()
-        #contactUri.setScheme(Uri.SCHEME_SIP)
-        #contactUri.setHost(hop.getHost());
-        #contactUri.setPort(hop.getPort());
-        #contactHeader = ContactHeader()
-        #contactHeader.setAddress(contactUri)
-        #result.addHeader(contactHeader);
 
         contentLengthHeader = ContentLengthHeader(0)
         result.addHeader(contentLengthHeader);
@@ -1947,7 +1940,7 @@ class MessageFactory():
         if not fromHeader is None:
             fromHeader.setTag(SipUtils.generateTag())
 
-        topmostViaHeader = result.getTopmostViaHeader()
+        topmostViaHeader = result.getTopViaHeader()
         if not topmostViaHeader is None:
             topmostViaHeader.setBranch(None);
 
@@ -1955,7 +1948,6 @@ class MessageFactory():
 
     @staticmethod
     def createRequestInvite(user1, user2, hop):
-
         if not isinstance(user1, SipAddress) or not isinstance(user2, SipAddress):
             raise ESipMessageException("Invalid argument format")
         
@@ -2024,7 +2016,7 @@ class MessageFactory():
         if not maxForwards is None:
             result.addHeader(copy.deepcopy(maxForwards))
 
-        topVia = inviteRequest.getTopmostViaHeader()
+        topVia = inviteRequest.getTopViaHeader()
         if not topVia is None:
             result.addHeader(copy.deepcopy(topVia))
             
@@ -2037,159 +2029,164 @@ class MessageFactory():
 ######## transactions ################
 
 class SipTransaction(object):
-	"""Transactions base
-    
+    """Transactions base
+
     This interface represents a generic transaction interface defining the methods common
-	between client and server transactions."""
+    between client and server transactions."""
 
-	def __init__(self, sipStack, originalRequest, lp = None):
-		self.branch = None
+    def __init__(self, sipStack, originalRequest, transport = None):
+        self.branch = None
 
-		self.originalRequest = originalRequest 
-		self.stack = sipStack
-		self.transport = transport # transport used for sending/receiving transaction messages
+        self.originalRequest = originalRequest 
+        self.stack = sipStack
+        # transport used for sending/receiving transaction messages
+        self.transport = transport
+        self.state = None
 
 class SipTransactionClientNonInvite(SipTransaction):
-	""" Client transaction"""
+    """ Client transaction"""
 
-	LOGGER_NAME = 'SipClientTransaction'
+    LOGGER_NAME = 'SipClientTransaction'
 
-	def __init__(self, sipStack, request, lp = None):
-		SipTransaction.__init__(self, sipStack, request, lp)
+    def __init__(self, sipStack, request, lp = None):
+        SipTransaction.__init__(self, sipStack, request, lp)
 
-	def sendAck(self):
-		"""Creates a new Ack message from the Request associated with this client transaction."""
-		logger = logging.getLogger(self.LOGGER_NAME)
-		logger.debug('sendAck() Enter')
+    def sendAck(self):
+        """Creates a new Ack message from the Request associated with this client transaction."""
+        logger = logging.getLogger(self.LOGGER_NAME)
+        logger.debug('sendAck() Enter')
 
-		ackRequest = MessageFactory.createRequestAck(self.getOriginalRequest())
-		self._sipStack.sendRequest(ackRequest)
+        ackRequest = MessageFactory.createRequestAck(self.getOriginalRequest())
+        self._sipStack.sendRequest(ackRequest)
 
-		logger.debug('sendAck() Leave')
+        logger.debug('sendAck() Leave')
 
-	def createCancel(self):
-		"""Creates a new Cancel message from the Request associated with this client transaction."""
-		raise ENotImplemented()
+    def createCancel(self):
+        """Creates a new Cancel message from the Request associated with this client transaction."""
+        raise ENotImplemented()
 
-	def sendRequest(self, request = None):
-		"""Sends the Request which created this ClientTransaction.
+    def sendRequest(self, request = None):
+        """Sends the Request which created this ClientTransaction.
 
-		When an application wishes to send a Request message,
-		it creates a Request and then creates a new ClientTransaction
-		by call to createClientTransaction. Calling this method
-		on the ClientTransaction sends the Request onto the network. 
+        When an application wishes to send a Request message,
+        it creates a Request and then creates a new ClientTransaction
+        by call to createClientTransaction. Calling this method
+        on the ClientTransaction sends the Request onto the network. 
 
-		This method assumes that the Request is sent out of Dialog. It uses the Router to determine the next hop.
-		If the Router returns a empty iterator, and a Dialog is associated with the outgoing request of the Transaction
-		then the Dialog route set is used to send the outgoing request.
-		"""
+        This method assumes that the Request is sent out of Dialog. It uses the Router to determine the next hop.
+        If the Router returns a empty iterator, and a Dialog is associated with the outgoing request of the Transaction
+        then the Dialog route set is used to send the outgoing request.
+        """
 
-		logger = logging.getLogger(self.LOGGER_NAME)
-		logger.debug('sendRequest() Enter')
+        logger = logging.getLogger(self.LOGGER_NAME)
+        logger.debug('sendRequest() Enter')
 
-		#if not self.getState() is None:
-		# raise ESipStackInvalidState('Request already sent')
+        #if not self.getState() is None:
+        # raise ESipStackInvalidState('Request already sent')
 
-		request = request if not request is None else self.getOriginalRequest()
+        request = request if not request is None else self.getOriginalRequest()
 
-		# set the branch id for the top via header.
-		topVia = request.getTopmostViaHeader()
-		topVia.setBranch(self.getBranch());
+        # set the branch id for the top via header.
+        topVia = request.getTopViaHeader()
+        topVia.setBranch(self.getBranch());
 
-		# if this is not the first request for this transaction,
-		if self.getState() in [SipTransaction.TRANSACTION_STATE_PROCEEDING, SipTransaction.TRANSACTION_STATE_CALLING]:
+        # if this is not the first request for this transaction,
+        if self.getState() in [SipTransaction.TRANSACTION_STATE_PROCEEDING, SipTransaction.TRANSACTION_STATE_CALLING]:
 
-			# if this is a TU-generated ACK request,
-			if request.getMethod() == SipRequest.METHOD_ACK:
+            # if this is a TU-generated ACK request,
+            if request.getMethod() == SipRequest.METHOD_ACK:
 
-				# send directly to the underlying transport and close this transaction
-				#if self.isReliable():
-				self.setState(SipTransaction.TRANSACTION_STATE_TERMINATED)
-				self._sipStack.sendRequest(request);
+                # send directly to the underlying transport and close this transaction
+                #if self.isReliable():
+                self.setState(SipTransaction.TRANSACTION_STATE_TERMINATED)
+                self._sipStack.sendRequest(request);
 
-				#else:
-				# self.setState(SipTransaction.TRANSACTION_STATE_COMPLETED)
+                #else:
+                # self.setState(SipTransaction.TRANSACTION_STATE_COMPLETED)
 
-				#self.cleanUpOnTimer()
-			else:
-				self.sipStack.sendRequest(request);
+                #self.cleanUpOnTimer()
+            else:
+                self.sipStack.sendRequest(request);
 
-		# if this is the FIRST request for this transaction,
-		elif self.getState() is None: 
+        # if this is the FIRST request for this transaction,
+        elif self.getState() is None: 
 
-			# Save this request as the one this transaction is handling 
-			#self.setRequest(message); 
+            # Save this request as the one this transaction is handling 
+            #self.setRequest(message); 
 
-			# change to trying/calling state 
-			# set state first to avoid race condition.. 
-			if request.getMethod() == SipRequest.METHOD_INVITE:
-				self.setState(SipTransaction.TRANSACTION_STATE_CALLING) 
-			elif request.getMethod() == SipRequest.METHOD_ACK:
-				# Acks are never retransmitted. 
-				self.setState(SipTransaction.TRANSACTION_STATE_TERMINATED)
-				# TODO: cleanUpOnTimer(); 
-			else:
-				self.setState(SipTransaction.TRANSACTION_STATE_TRYING); 
+            # change to trying/calling state 
+            # set state first to avoid race condition.. 
+            if request.getMethod() == SipRequest.METHOD_INVITE:
+                self.setState(SipTransaction.TRANSACTION_STATE_CALLING) 
+            elif request.getMethod() == SipRequest.METHOD_ACK:
+                # Acks are never retransmitted. 
+                self.setState(SipTransaction.TRANSACTION_STATE_TERMINATED)
+                # TODO: cleanUpOnTimer(); 
+            else:
+                self.setState(SipTransaction.TRANSACTION_STATE_TRYING); 
 
-			#TODO if not self.isReliable():
-			#TODO self.enableRetransmissionTimer() 
-			# TODO Enable appropriate timers
-			
-			self._sipStack.sendRequest(request);
+            #TODO if not self.isReliable():
+            #TODO self.enableRetransmissionTimer() 
+            # TODO Enable appropriate timers
+            
+            self._sipStack.sendRequest(request);
 
-		logger.debug('sendRequest() Leave')
+        logger.debug('sendRequest() Leave')
 
-	def processResponse(self, response):
-		logger = logging.getLogger(self.LOGGER_NAME)
-		logger.debug('processResponse() Enter in state %s' % self.getState())
+    def processResponse(self, response):
+        logger = logging.getLogger(self.LOGGER_NAME)
+        logger.debug('processResponse() Enter in state %s' % self.getState())
 
-		blockListeners = False 
+        blockListeners = False 
 
-		state = self.getState()
-		invTransaction = self.getOriginalRequest().getMethod() == SipRequest.METHOD_INVITE
+        state = self.getState()
+        invTransaction = self.getOriginalRequest().getMethod() == SipRequest.METHOD_INVITE
 
-		# 100 - 199 handle provisioning response
-		if response.getStatusCode() >= 100 and response.getStatusCode() <= 199:
-			if state in [SipTransaction.TRANSACTION_STATE_CALLING, SipTransaction.TRANSACTION_STATE_TRYING, SipTransaction.TRANSACTION_STATE_PROCEEDING]:
-				self.setState(SipTransaction.TRANSACTION_STATE_PROCEEDING)
-			else:
-				blockListeners = True 
+        # 100 - 199 handle provisioning response
+        if response.getStatusCode() >= 100 and response.getStatusCode() <= 199:
+            if state in [SipTransaction.TRANSACTION_STATE_CALLING, SipTransaction.TRANSACTION_STATE_TRYING, SipTransaction.TRANSACTION_STATE_PROCEEDING]:
+                self.setState(SipTransaction.TRANSACTION_STATE_PROCEEDING)
+            else:
+                blockListeners = True 
 
-		# 200 - 299 handle ok response
-		elif response.getStatusCode() >= 200 and response.getStatusCode() <= 299:
-			if invTransaction: 
-				if state in [SipTransaction.TRANSACTION_STATE_CALLING, SipTransaction.TRANSACTION_STATE_PROCEEDING]:
-					self.setState(SipTransaction.TRANSACTION_STATE_TERMINATED)
-				else:
-					blockListeners = True 
-			else:
-				if state in [SipTransaction.TRANSACTION_STATE_TRYING, SipTransaction.TRANSACTION_STATE_PROCEEDING]:
-					self.setState(SipTransaction.TRANSACTION_STATE_COMPLETED)
-				else:
-					blockListeners = True 
+        # 200 - 299 handle ok response
+        elif response.getStatusCode() >= 200 and response.getStatusCode() <= 299:
+            if invTransaction: 
+                if state in [SipTransaction.TRANSACTION_STATE_CALLING, SipTransaction.TRANSACTION_STATE_PROCEEDING]:
+                    self.setState(SipTransaction.TRANSACTION_STATE_TERMINATED)
+                else:
+                    blockListeners = True 
+            else:
+                if state in [SipTransaction.TRANSACTION_STATE_TRYING, SipTransaction.TRANSACTION_STATE_PROCEEDING]:
+                    self.setState(SipTransaction.TRANSACTION_STATE_COMPLETED)
+                else:
+                    blockListeners = True 
 
-		# 300 - 699 handle ok response
-		elif response.getStatusCode() >= 300 and response.getStatusCode() <= 699:
-			if invTransaction: 
-				self.sendAck()
-			if state in [SipTransaction.TRANSACTION_STATE_CALLING, SipTransaction.TRANSACTION_STATE_TRYING, SipTransaction.TRANSACTION_STATE_PROCEEDING]:
-				self.setState(SipTransaction.TRANSACTION_STATE_COMPLETED)
-			else:
-				blockListeners = True 
-		else:
-			blockListeners = True 
+        # 300 - 699 handle ok response
+        elif response.getStatusCode() >= 300 and response.getStatusCode() <= 699:
+            if invTransaction: 
+                self.sendAck()
+            if state in [SipTransaction.TRANSACTION_STATE_CALLING, SipTransaction.TRANSACTION_STATE_TRYING, SipTransaction.TRANSACTION_STATE_PROCEEDING]:
+                self.setState(SipTransaction.TRANSACTION_STATE_COMPLETED)
+            else:
+                blockListeners = True 
+        else:
+            blockListeners = True 
 
-		if blockListeners:
-			logger.debug('discarding message %s %s', respnse.getStatusCode(), getReasonPhrase())
+        if blockListeners:
+            logger.debug('discarding message %s %s', respnse.getStatusCode(), getReasonPhrase())
 
-		logger.debug('processResponse() Leave')
+        logger.debug('processResponse() Leave')
 
-		return blockListeners 
+        return blockListeners 
+
+class SipTranClientState():
+    pass
 
 class SipTranClientNonInviteCalling(SipTransaction):
-	"""Implementation of calling state for non-Invite Client transaction state"""
+    """Implementation of calling state for non-Invite Client transaction state"""
 
-	LOGGER_NAME = 'SipClientTransaction'
+    LOGGER_NAME = 'SipClientTransaction'
 
 ######## stack ####################
 
@@ -2391,8 +2388,9 @@ class TransportUdp(Transport, IpSocketListener):
         if txData.data is None:
             self.logger.error('Request to send data, but no binary data available')
             raise Exception('Request to send data, but no binary data available')
+
         self.logger.info('Sending data of size %d to %s' % (len(txData.data), str(txData.dest)))
-        self.logger.debug('Data dump:\n------\n%s\n-------', txData.data)
+        #self.logger.debug('Data dump:\n------\n%s\n-------', txData.data)
 
         sendSock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sendSock.bind((self.localAddress, 0))
@@ -2442,7 +2440,7 @@ class Module():
         self.stack = None 
 
         # module priority
-        self.priority = PRIO_TRANSPORT_LAYER
+        self.priority = Module.PRIO_TRANSPORT_LAYER
 
     def getId(self):
         """Get module id"""
@@ -2486,6 +2484,51 @@ class Module():
 
     def onRegistered(self, stack):
         self.stack = stack
+
+class ModuleSipLog(Module):
+    """Sip module for logging all incoming and outgoing sip messages"""
+
+    LOGGER_NAME = 'BSip.SipLog' 
+
+    def __init__(self):
+        Module.__init__(self)
+        self.priority = Module.PRIO_TRANSPORT_LAYER
+        self.logger = logging.getLogger(self.LOGGER_NAME)
+
+    def getId(self):
+        return 'siplog'
+
+    def onRxRequest(self, rxData):
+        self.logger.info('-----------------------------')
+        self.logger.info('Received SIP request')
+        self.logger.info('-----------------------------')
+        self.logger.info(rxData.msg)
+        self.logger.info('-----------------------------')
+        return False
+
+    def onRxResponse(self, rxData):
+        self.logger.info('-----------------------------')
+        self.logger.info('Received SIP response')
+        self.logger.info('-----------------------------')
+        self.logger.info(rxData.msg)
+        self.logger.info('-----------------------------')
+        return False
+
+    def onTxRequest(self, txData):
+        self.logger.info('-----------------------------')
+        self.logger.info('Sent SIP request')
+        self.logger.info('-----------------------------')
+        self.logger.info(txData.msg)
+        self.logger.info('-----------------------------')
+        return False
+
+    def onTxResponse(self, txData):
+        self.logger.info('-----------------------------')
+        self.logger.info('Sent SIP response')
+        self.logger.info('-----------------------------')
+        self.logger.info(txData.msg)
+        self.logger.info('-----------------------------')
+        return False
 
 class TransportManager():
     """Responsible for management of all transports"""
@@ -2576,7 +2619,7 @@ class SipStack():
         return self.state == SipStack.STATE_RUNNING
 
     def registerModule(self, module):
-        self.logger.debug('Registering module %s (priority %d)' % (module.name, module.priority))
+        self.logger.debug('Registering module %s (priority %d)' % (module.getId(), module.priority))
         self.modules.append(module)
         module.onRegistered(self)
 
@@ -2606,25 +2649,44 @@ class SipStack():
             if consumed: 
                 break 
 
-        self.logger.debug(consumed)
         if not consumed:
             self.logger.warning('Message not consumed by any of modules')
 
     def sendStateless(self, txData):
-        if not txData.transport is None:
-            self.fixViaHeaders(txData)
-            txData.data = str(txData.msg)
-            txData.transport.send(txData)
-        else:
+        if txData.transport is None:
             raise Exception('no transport selected')
 
-    def fixViaHeaders(self, txData):
+        # fix message according to transport
+        self.fixTxData(txData)
+        # serialize SIP message
+        txData.data = str(txData.msg)
+
+        # distribute message to modules with transport priority 
+        # loop is over all modules 
+        consumed = False
+        for m in self.modules:
+            if m.priority != Module.PRIO_TRANSPORT_LAYER:
+                continue
+            if isinstance(txData.msg, SipRequest):
+               consumed = m.onTxRequest(txData)
+            elif isinstance(txData.msg, SipResponse):
+               consumed = m.onTxResponse(txData)
+            else:
+                raise BSipException('Unknown SIP message type') 
+
+            if consumed: 
+                self.logger.debug('Message consumed by module: %s' % m.getId())
+                break
+
+        if not consumed:
+            txData.transport.send(txData)
+
+    def fixTxData(self, txData):
         if txData.transport is None:
             return
 
         # get message top via header
-        topVia = txData.msg.getTopmostViaHeader()
-
+        topVia = txData.msg.getTopViaHeader()
         if topVia is None: 
             self.logger.debug('Adding new Via header generated by listening point')
             # get transport header
@@ -2632,13 +2694,24 @@ class SipStack():
             txData.msg.addHeader(transportVia)
             print "This is via header", str(transportVia)
         else:
-
             if txData.transport.type != topVia.getTransport():
                 topVia.setTransport(txData.transport.type)
             if txData.transport.localAddress != topVia.getHost():
                 topVia.setHost(txData.transport.localAddress)
             if txData.transport.port != topVia.getPort():
                 topVia.setPort(txData.transport.port)
+
+        # get message contact header
+        contactHeader = txData.msg.getHeaderByType(ContactHeader)
+        if contactHeader is None:
+            contactHeader = ContactHeader()
+
+        contactUri = SipUri()
+        contactUri.setScheme(Uri.SCHEME_SIP)
+        contactUri.setHost(txData.transport.localAddress);
+        contactUri.setPort(txData.transport.port);
+        contactHeader.setAddress(contactUri)
+        txData.msg.addHeader(contactHeader);
 
     def sendRequest(self, request, transport = "udp"):
         """Sends the Request statelessly, that is no transaction record is associated with
