@@ -49,7 +49,7 @@ class SipModuleRegistration(sipstack.Module):
         print 'Registering user', user
         txData = sipstack.SipTxData()
         txData.msg = sipstack.MessageFactory.createRequestRegister(user.getAddress())
-        txData.transport = self.stack.acquireTransport(sipstack.Sip.TRANSPORT_UDP)
+        txData.transport = self.stack.acquireTransport(sipstack.Sip.TRANSPORT_TCP)
         txData.dest = user.getProxy() 
         self.stack.sendStateless(txData)
 
@@ -79,14 +79,16 @@ class BSip(cmd.Cmd):
         self.stackThread = SipStackThread(self.stack)
         self.stackThread.start()
 
-        self.tranUdp = sipstack.TransportUdp(self.stack, '127.0.0.1', 5060)
+        #self.tranUdp = sipstack.TransportUdp(self.stack, '127.0.0.1', 5060)
         self.tranLoopback = sipstack.TransportLoopback(self.stack)
+        #self.tranUdp = sipstack.TransportUdp(self.stack, '192.168.0.104', 5060)
+        self.tranTcp = sipstack.TransportTcp(self.stack, '192.168.0.104', 5060)
 
         self.regModule = SipModuleRegistration()
         self.stack.registerModule(self.regModule)
 
         self.stack.registerModule(sipstack.ModuleSipLog())
-        
+
         self.user = sipstack.User()
         userAddr = sipstack.SipAddress()
         userAddr.setDisplayName('Bob')
@@ -96,8 +98,19 @@ class BSip(cmd.Cmd):
         user1Uri.setUser("bob")
         user1Uri.setHost("beloxi.com")
         self.user.setUri(user1Uri)
-        #self.user.setProxy(('127.0.0.1', 5555))
         self.user.setProxy(('127.0.0.1', 5060))
+
+        self.user = sipstack.User()
+        userAddr = sipstack.SipAddress()
+        userAddr.setDisplayName('Michal Nezerka')
+        self.user.setAddress(userAddr)
+        user1Uri = sipstack.SipUri()
+        user1Uri.setScheme(sipstack.Uri.SCHEME_SIP)
+        user1Uri.setUser("michal.nezerka")
+        user1Uri.setHost("iptel.org")
+        self.user.setUri(user1Uri)
+        #self.user.setProxy(('127.0.0.1', 5060))
+        self.user.setProxy(('sip.iptel.org', 5060))
 
     def do_greet(self, line):
         print "hello"
@@ -125,7 +138,6 @@ class BSip(cmd.Cmd):
 
     def do_register(self, userId):
         """Register user"""
-        print "registering user", self.user
         self.regModule.register(self.user)
 
     def emptyline(self):

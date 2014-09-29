@@ -484,6 +484,9 @@ class User():
         self._digestPassword = None
         self._proxy = None
 
+    def __str__(self):
+        return str(self._address)
+
     def setAddress(self, address):
         self._address = address
 
@@ -2410,21 +2413,61 @@ class TransportTcp(Transport, IpSocketListener):
     type = Sip.TRANSPORT_TCP
 
     def __init__(self, stack, localAddress, port):
-        SipTransport.__init__(self, stack)
+        Transport.__init__(self, stack)
         self.localAddress = localAddress
         self.port = port
         self.logger = logging.getLogger(self.LOGGER_NAME)
 
         self.logger.debug('Creating listening TCP socket')
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind((localAddress, port))
+        self.socket.listen(5)
 
-        self.stack.registerTransport(self)
-        self.stack.getIpDispatcher().registerListeningSocket(self.socket, self)
+        self.stack.transportManager.registerTransport(self)
+        self.stack.ipDispatcher.registerListeningSocket(self.socket, self)
 
     def getId(self):
         return 'tcp-%s-%d' % (self.localAddress, self.port) 
+
+    def onData(self, data, sourceAddress, destinationAddress):
+        self.logger.debug('Received data')
+        return
+        self.logger.debug('Received data of length %d from %s to %s' % (len(data), sourceAddress, destinationAddress))
+        rxData = SipRxData()
+        rxData.transport = self
+        rxData.timestamp = time.time()
+        rxData.source = sourceAddress 
+        rxData.destination = destinationAddress 
+        rxData.data = data
+
+        self.stack.transportManager.onRxData(rxData)
+
+    def send(self, txData):
+        if txData.data is None:
+            self.logger.error('Request to send data, but no binary data available')
+            raise Exception('Request to send data, but no binary data available')
+
+        self.logger.info('Sending data of size %d to %s' % (len(txData.data), str(txData.dest)))
+        #self.logger.debug('Data dump:\n------\n%s\n-------', txData.data)
+
+        sendSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sendSock.bind((self.localAddress, 0))
+        self.logger.debug('Establishing connectin to %s ...' % (str(txData.dest)))
+        sendSock.connect(txData.dest)
+        self.logger.debug('Connection established (%s)' % (str(txData.dest)))
+        sendSock.send(txData.data)
+        self.logger.debug('Data sent')
+        sendSock.close()
+
+    def getViaHeader(self):
+        topVia = SipViaHeader()
+        topVia.setTransport(Sip.TRANSPORT_UDP)
+        topVia.setHost(self.localAddress)
+        topVia.setPort(self.port)
+        return topVia 
+
 
 class Module():
     """Sip module base class"""
