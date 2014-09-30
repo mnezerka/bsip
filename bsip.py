@@ -4,10 +4,12 @@
 
 import logging
 import threading
-import sipstack
-import sipmessage
 import time
 import cmd
+
+import bsip.message
+import bsip.stack
+import bsip.user
 
 class SipStackThread(threading.Thread):
     LOGGER_NAME = 'sipStackThread'
@@ -23,11 +25,11 @@ class SipStackThread(threading.Thread):
     def stop(self):
         self.__sipStack.stop()
 
-class SipModuleRegistration(sipstack.Module):
+class SipModuleRegistration(bsip.stack.Module):
     """Registration module"""
 
     def __init__(self):
-        self.priority = sipstack.Module.PRIO_DIALOG_USAGE
+        self.priority = stack.Module.PRIO_DIALOG_USAGE
 
     def getId(self):
         return 'reg'
@@ -36,8 +38,8 @@ class SipModuleRegistration(sipstack.Module):
     def onRxRequest(self, rxData):
         print 'Received SIP request'
         print 'Sending SIP response'
-        response = sipstack.MessageFactory.createResponse(200, rxData.msg)
-        #txData.msg = sipstack.MessageFactory.createRequestRegister(user.getAddress())
+        response = stack.MessageFactory.createResponse(200, rxData.msg)
+        #txData.msg = stack.MessageFactory.createRequestRegister(user.getAddress())
         return True 
 
     # Called on rx response
@@ -47,9 +49,9 @@ class SipModuleRegistration(sipstack.Module):
 
     def register(self, user):
         print 'Registering user', user
-        txData = sipstack.SipTxData()
-        txData.msg = sipstack.MessageFactory.createRequestRegister(user.getAddress())
-        txData.transport = self.stack.acquireTransport(sipstack.Sip.TRANSPORT_TCP)
+        txData = stack.SipTxData()
+        txData.msg = stack.MessageFactory.createRequestRegister(user.getAddress())
+        txData.transport = self.stack.acquireTransport(stack.Sip.TRANSPORT_TCP)
         txData.dest = user.getProxy() 
         self.stack.sendStateless(txData)
 
@@ -70,42 +72,37 @@ class BSip(cmd.Cmd):
         self.logger.addHandler(h)
         self.logger.debug('Logging initialized')
 
-        #localHop = sipmessage.Hop()
-        #localHop.setHost('127.0.0.1')
-        #localHop.setPort(5060)
-        #lp = sipstack.SipListeningPoint(self, localHop)
-
-        self.stack = sipstack.SipStack()
+        self.stack = bsip.stack.SipStack()
         self.stackThread = SipStackThread(self.stack)
         self.stackThread.start()
 
-        #self.tranUdp = sipstack.TransportUdp(self.stack, '127.0.0.1', 5060)
-        self.tranLoopback = sipstack.TransportLoopback(self.stack)
-        #self.tranUdp = sipstack.TransportUdp(self.stack, '192.168.0.104', 5060)
-        self.tranTcp = sipstack.TransportTcp(self.stack, '192.168.0.104', 5060)
+        #self.tranUdp = stack.TransportUdp(self.stack, '127.0.0.1', 5060)
+        self.tranLoopback = stack.TransportLoopback(self.stack)
+        #self.tranUdp = stack.TransportUdp(self.stack, '192.168.0.104', 5060)
+        self.tranTcp = stack.TransportTcp(self.stack, '192.168.0.104', 5060)
 
         self.regModule = SipModuleRegistration()
         self.stack.registerModule(self.regModule)
 
-        self.stack.registerModule(sipstack.ModuleSipLog())
+        self.stack.registerModule(stack.ModuleSipLog())
 
-        self.user = sipstack.User()
-        userAddr = sipstack.SipAddress()
+        self.user = bsip.user.User()
+        userAddr = bsip..SipAddress()
         userAddr.setDisplayName('Bob')
         self.user.setAddress(userAddr)
-        user1Uri = sipstack.SipUri()
-        user1Uri.setScheme(sipstack.Uri.SCHEME_SIP)
+        user1Uri = stack.SipUri()
+        user1Uri.setScheme(stack.Uri.SCHEME_SIP)
         user1Uri.setUser("bob")
         user1Uri.setHost("beloxi.com")
         self.user.setUri(user1Uri)
         self.user.setProxy(('127.0.0.1', 5060))
 
-        self.user = sipstack.User()
-        userAddr = sipstack.SipAddress()
+        self.user = stack.User()
+        userAddr = stack.SipAddress()
         userAddr.setDisplayName('Michal Nezerka')
         self.user.setAddress(userAddr)
-        user1Uri = sipstack.SipUri()
-        user1Uri.setScheme(sipstack.Uri.SCHEME_SIP)
+        user1Uri = stack.SipUri()
+        user1Uri.setScheme(stack.Uri.SCHEME_SIP)
         user1Uri.setUser("michal.nezerka")
         user1Uri.setHost("iptel.org")
         self.user.setUri(user1Uri)
