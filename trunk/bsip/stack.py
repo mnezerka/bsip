@@ -14,19 +14,10 @@ import sys
 import random
 import re
 
-class ESipMessageException(Exception):
-    pass
-
-class ESipMessageNotImplemented(ESipMessageException):
-    pass
-
-class ESipMessageHeaderInvalid(ESipMessageException):
-    pass
-
-class ESipStackException(Exception):
-    """Base class for all BSip exceptions"""
-    pass
-
+from sip import Sip
+import message
+from message import SipRequest
+from message import SipResponse
 
 class SipRxData():
     """Received data"""
@@ -230,13 +221,14 @@ class TransportUdp(Transport, IpSocketListener):
         self.logger.info('Sending data of size %d to %s' % (len(txData.data), str(txData.dest)))
         #self.logger.debug('Data dump:\n------\n%s\n-------', txData.data)
 
-        sendSock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sendSock.bind((self.localAddress, 0))
+        sendSock = self.socket
+        #sendSock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        #sendSock.bind((self.localAddress, 0))
         sendSock.sendto(txData.data, txData.dest)
-        sendSock.close()
+        #sendSock.close()
 
     def getViaHeader(self):
-        topVia = SipViaHeader()
+        topVia = message.SipViaHeader()
         topVia.setTransport(Sip.TRANSPORT_UDP)
         topVia.setHost(self.localAddress)
         topVia.setPort(self.port)
@@ -297,12 +289,11 @@ class TransportTcp(Transport, IpSocketListener):
         sendSock.close()
 
     def getViaHeader(self):
-        topVia = SipViaHeader()
+        topVia = message.SipViaHeader()
         topVia.setTransport(Sip.TRANSPORT_UDP)
         topVia.setHost(self.localAddress)
         topVia.setPort(self.port)
         return topVia 
-
 
 class Module():
     """Sip module base class"""
@@ -314,7 +305,6 @@ class Module():
     PRIO_APPLICATION = 64 
 
     def __init__(self):
-
         self.stack = None 
 
         # module priority
@@ -326,18 +316,10 @@ class Module():
 
     # Called to load the module
     def onLoad(self, stack):
-        pass
-
-    # Called to start
-    def start(self, stack):
-        pass
-
-    # Called to stop
-    def stop(self):
-        pass
+        self.stack = stack
 
     # Called before unload
-    def unload(self):
+    def onUnload(self):
         pass
 
     # Called on rx request
@@ -359,9 +341,6 @@ class Module():
     # Called on transaction state changed
     def onTsxState(tsx):
         pass
-
-    def onRegistered(self, stack):
-        self.stack = stack
 
 class ModuleSipLog(Module):
     """Sip module for logging all incoming and outgoing sip messages"""
@@ -428,7 +407,7 @@ class TransportManager():
     def onRxData(self, rxData):
         self.logger.debug('Sip data of length %d received from transport %s' % (len(rxData.data), rxData.transport.getId()))
 
-        sipParser = SipParser()
+        sipParser = message.SipParser()
         try:
             rxData.msg  = sipParser.parseSIPMessage(rxData.data)
         except ESipMessageException: 
@@ -454,52 +433,30 @@ class SipStack():
 
     LOGGER_NAME = 'BSip.Stack'
 
-    STATE_STOPPED = 0
-    STATE_RUNNING = 1
-
     def __init__(self):
         self.logger = logging.getLogger(self.LOGGER_NAME)
-        self.state = self.STATE_STOPPED
         self.modules = []
         self.transportManager = TransportManager(self)
         self.ipDispatcher = IpDispatcher(self)
 
-    def start(self):
-        """This method initiates the active processing of the stack."""
+    def loop(self):
+        """Main loop"""
+        self.logger.debug('Entering main loop')
 
-        self.state = SipStack.STATE_RUNNING
+        # allow ip dispatcher to do io operations on all sockets
+        self.ipDispatcher.doSelect()
 
-        # main loop
-        self.logger.debug('entering main loop')
-        while self.state == SipStack.STATE_RUNNING:
-
-            # allow ip dispatcher to do io operations on all sockets
-            self.ipDispatcher.doSelect()
-
-            # process events
-            # while not empty self.eventQueue
-            #   processEvent()
-             
-            #sys.stdout.write('.')
-            time.sleep(0.1)
-
-        self.logger.debug('stopped')
-
-    def stop(self):
-        """This methods initiates the shutdown of the stack."""
-        self.logger.debug('stopping')
-        self.state = SipStack.STATE_STOPPED
-
-    def getState(self):
-        return self.state
-
-    def isRunning(self):
-        return self.state == SipStack.STATE_RUNNING
-
+        # process events
+        # while not empty self.eventQueue
+        #   processEvent()
+         
+        #sys.stdout.write('.')
+        #time.sleep(0.1)
+    
     def registerModule(self, module):
         self.logger.debug('Registering module %s (priority %d)' % (module.getId(), module.priority))
         self.modules.append(module)
-        module.onRegistered(self)
+        module.onLoad(self)
 
     def onRxMessage(self, rxData):
         self.logger.debug('Received SIP message')
@@ -580,12 +537,12 @@ class SipStack():
                 topVia.setPort(txData.transport.port)
 
         # get message contact header
-        contactHeader = txData.msg.getHeaderByType(ContactHeader)
+        contactHeader = txData.msg.getHeaderByType(message.ContactHeader)
         if contactHeader is None:
-            contactHeader = ContactHeader()
+            contactHeader = message.ContactHeader()
 
-        contactUri = SipUri()
-        contactUri.setScheme(Uri.SCHEME_SIP)
+        contactUri = message.SipUri()
+        contactUri.setScheme(message.Uri.SCHEME_SIP)
         contactUri.setHost(txData.transport.localAddress);
         contactUri.setPort(txData.transport.port);
         contactHeader.setAddress(contactUri)
@@ -672,229 +629,8 @@ class SipStack():
 ######## stack ####################
 
 class UnitTestCase(unittest.TestCase):
-    def setUp(self):
-        self.CONTENT = 'MyContent'
-        self.USR_BOB_USERNAME =  'bob'
-        self.USR_BOB_DISPLAYNAME =  'Bob'
-        self.USR_BOB_DOMAIN =  'beloxi.com'
-        self.USR_BOB_SHORT = 'sip:%s@%s' % (self.USR_BOB_USERNAME, self.USR_BOB_DOMAIN)
-        self.USR_BOB_ADDR = '"%s" <%s>' % (self.USR_BOB_DISPLAYNAME, self.USR_BOB_SHORT)
-
-        self.localHop = Hop()
-        self.localHop.setHost('127.0.0.1')
-        self.localHop.setPort(5060)
-
-        self.user1 = SipAddress()
-        self.user1Uri = SipUri()
-        self.user1Uri.setScheme(Uri.SCHEME_SIP)
-        self.user1Uri.setUser("ITSY000001")
-        self.user1Uri.setHost("brn10.iit.ims")
-        self.user1.setDisplayName('ITSY000001')
-        self.user1.setUri(self.user1Uri)
-
-        self.user2 = SipAddress()
-        self.user2Uri = SipUri()
-        self.user2Uri.setScheme(Uri.SCHEME_SIP)
-        self.user2Uri.setUser("ITSY000002")
-        self.user2Uri.setHost("brn10.iit.ims")
-        self.user2.setDisplayName('ITSY000002')
-        self.user2.setUri(self.user2Uri)
-
-    def testHop(self):
-        IP = "1.1.1.1"
-        h = Hop()
-        h = Hop("1.1.1.1")
-        self.assertEqual(h.getHost(), IP)
-        h = Hop("1.1.1.1:89")
-        self.assertEqual(h.getHost(), IP)
-        self.assertEqual(h.getPort(), 89)
-        h = Hop(("1.1.1.1", 89))
-        self.assertEqual(h.getHost(), IP)
-        self.assertEqual(h.getPort(), 89)
-        h.setTransport("udp")
-        self.assertEqual(h.getTransport(), "udp")
-
-    def testSipUri(self):
-        x = SipUri()
-        x.setScheme(Sip.URI_PREFIX_SIP)
-        x.setHost(self.USR_BOB_DOMAIN)
-        x.setUser(self.USR_BOB_USERNAME)
-        self.assertEqual(self.USR_BOB_SHORT, str(x))
-
-        x = SipUri(self.USR_BOB_SHORT)
-        self.assertEqual(self.USR_BOB_SHORT, str(x))
-
-        addr = self.USR_BOB_SHORT + ';transport=tcp'
-        x = SipUri(addr)
-        self.assertEqual(addr, str(x))
-
-    def testSipAddress(self):
-        x = SipAddress()
-        x.setDisplayName(self.USR_BOB_DISPLAYNAME)
-        u = SipUri(self.USR_BOB_SHORT)
-        x.setUri(u)
-        self.assertEqual(str(x), self.USR_BOB_ADDR)
-
-        x = SipAddress(self.USR_BOB_SHORT)
-        self.assertEqual(str(x), self.USR_BOB_SHORT)
-
-        x = SipAddress(self.USR_BOB_ADDR)
-        self.assertEqual(str(x), self.USR_BOB_ADDR)
-
-    def testSipMessage(self):
-        m = SipMessage()
-        m.setContent(self.CONTENT)
-
-        m = SipMessage()
-        fh = SipFromHeader('sip:alice@blue.com')
-        m.addHeader(fh)
-        th = SipToHeader('sip:bob@blue.com')
-        m.addHeader(th)
-        cih = SipCallIdHeader('callid')
-        m.addHeader(cih)
-        cseq = SipCSeqHeader('34 REGISTER')
-        m.addHeader(cseq)
-        m.setContent(self.CONTENT)
-        m.getTransactionId()
-
-        tv = SipViaHeader('SIP/2.0/UDP some.host;branch=z9hG4bKsomebranch')
-        m.addHeader(tv)
-        m.getTransactionId()
-
-    def testMediaType(self):
-        MT = "application/sdp"
-        mt = MediaType(MT)
-        self.assertEqual(str(mt), MT)
-
-    def testAddressHeader(self):
-        header = 'From: ' + self.USR_BOB_ADDR
-
-        h = SipAddressHeader('From')
-        a = SipAddress(self.USR_BOB_ADDR)
-        h.setAddress(a)
-        self.assertEqual(str(h), header)
-
-        h = SipAddressHeader('From', self.USR_BOB_ADDR)
-        self.assertEqual(str(h), header)
-
-    def testAuthenticationInfoHeader(self):
-        h = AuthenticationInfoHeader()
-        h.setNextNonce('xnoncex')
-        self.assertEqual(h.getNextNonce(), 'xnoncex')
-        str(h)
-        h = AuthenticationInfoHeader('nextnonce="xxx"')
-        self.assertEqual(h.getNextNonce(), 'xxx')
-        str(h)
-
-    def testAuthenticationHeader(self):
-        h = AuthenticationHeader('test')
-        h.setScheme('Digest')
-        h.setNonce('xnoncex')
-        h.setCNonce('xcnoncex')
-        h.setNC(45)
-        str(h)
-
-        h = AuthenticationHeader('test', 'Digest algorithm="md5", nonce="xxx"')
-        str(h)
-
-    def testAuthorizationHeader(self):
-        h = AuthorizationHeader()
-        h.setScheme('Digest')
-        h.setNC(34)
-        str(h)
-
-    def testContentLengthHeader(self):
-        h = ContentLengthHeader("34")
-        self.assertEqual(h.getContentLength(), 34)
-        h.setContentLength(45)
-        self.assertEqual(h.getContentLength(), 45)
-    
-    def testContentTypeHeader(self):
-        h = ContentTypeHeader("application/sdp")
-        str(h)
-
-    def testViaHeader(self):
-        h = SipViaHeader()
-        h.setHost('127.0.0.1')
-        h.setProtocol('udp')
-        h.setPort(5060)
-
-        h2 = SipViaHeader('SIP/2.0/UDP some.host;branch=z9hG4bKsomebranch;lskpmc=P01')
-
-    def testWwwAuthenticateHeader(self):
-        h = WwwAuthenticateHeader()
-        h.setScheme('Digest')
-        h.setAlgorithm('md5')
-        h.setDomain('some.domain')
-        h.setNonce('ncval')
-        h.setOpaque('opqval')
-        h.setQop('qopval')
-        h.setRealm('some.realm')
-        h.setUri('some.uri')
-        h.setStale(False)
-        str(h)
-
-    def testSipUtils(self):
-        SipUtils.generateCallIdentifier('xyz')
-        SipUtils.generateTag()
-        SipUtils.generateBranchId()
-
-    def testMessageFactory(self):
-        inv = MessageFactory.createRequestInvite(self.user1, self.user2, self.localHop)
-        ack = MessageFactory.createRequestAck(inv)
-
-    def testHeaderFactory(self):
-        rrh = SipRecordRouteHeader();
-        rrh.setAddress(self.user1)
-        rrh["x"] = "val1"
-        rrh["y"] = "val2"
-        rh = HeaderFactory.createRouteFromRecordRoute(rrh)
-        self.assertEqual(rrh.getAddress().getDisplayName(), rh.getAddress().getDisplayName())
-        self.assertEqual(rrh["x"], rh["x"])
-        self.assertEqual(rrh["y"], rh["y"])
-
-    def testSipMessageDialogId(self):
-        msg = MessageFactory.createRequestInvite(self.user1, self.user2, self.localHop)
-        self.assertEqual(msg.getDialogId(True), None)
-        hFrom = msg.getFromHeader()
-        hTo = msg.getToHeader()
-        hFrom.setTag("fromtag")
-        hTo.setTag("totag")
-        callId = msg.getCallId()
-        self.assertEqual(msg.getDialogId(False), callId + ":fromtag:totag")
-        self.assertEqual(msg.getDialogId(True), callId + ":totag:fromtag")
-
-    def testSipMessageParserMultipleHeaderValues(self):
-        sipParser = SipParser()
-        headers = sipParser.parseHeader("Contact: \"Mr. Watson\" <sip:watson@worcester.bell-telephone.com>;q=0.7; expires=3600, \"Mr. Wa\,t\:s\=on\" <sip:watson@bell-telephone.com> ;q=0.1")
-        self.assertEqual(len(headers), 2)
-        self.assertEqual(headers[0].getAddress().getDisplayName(), "Mr. Watson")
-        self.assertEqual(headers[0].getAddress().getUri().getUser(), "watson")
-        self.assertEqual(headers[0].getAddress().getUri().getHost(), "worcester.bell-telephone.com")
-        self.assertEqual(headers[1].getAddress().getDisplayName(), "Mr. Wa\,t\:s\=on")
-        self.assertEqual(headers[1].getAddress().getUri().getUser(), "watson")
-        self.assertEqual(headers[1].getAddress().getUri().getHost(), "bell-telephone.com")
-
-    def testSipMessageParserOptions(self):
-        f = open('data/sip_options.txt', 'rb')
-        msg = f.read()
-        f.close()
-        sipParser = SipParser()
-        sipParser.parseSIPMessage(msg) 
-
-    def testSipMessageParserInvite(self):
-        f = open('data/sip_invite.txt', 'rb')
-        msg = f.read()
-        f.close()
-        sipParser = SipParser()
-        sipParser.parseSIPMessage(msg) 
-
-    def testSipMessageParser403Forbidden(self):
-        f = open('data/sip_register_403_forbidden.txt', 'rb')
-        msg = f.read()
-        f.close()
-        sipParser = SipParser()
-        sipParser.parseSIPMessage(msg) 
+    def testX(self):
+        pass
 
 def suite():
     suite = unittest.TestLoader().loadTestsFromTestCase(UnitTestCase)

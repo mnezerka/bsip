@@ -1,3 +1,5 @@
+import unittest
+
 class User():
     def __init__(self):
         self._address = None
@@ -53,4 +55,19 @@ class User():
 
     def getProxy(self):
         return self.proxy
+
+##### unit test cases #########################################################################
+
+class UnitTestCase(unittest.TestCase):
+    
+    def testSipUtils(self):
+        pass
+       
+def suite():
+    suite = unittest.TestLoader().loadTestsFromTestCase(UnitTestCase)
+    return suite
+
+if __name__ == '__main__':
+    unittest.TextTestRunner(verbosity=2).run(suite())
+
 

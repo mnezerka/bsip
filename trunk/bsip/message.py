@@ -7,6 +7,10 @@ import copy
 import re
 #import urlparse
 
+from sip import Sip
+from sip import SipUtils
+from sip import HttpUtils
+
 class Uri(dict):
     SCHEME_SIP = 'sip'
 
@@ -61,7 +65,7 @@ class SipUri(Uri):
                     str = str[len(px) + 1:]
                     break 
             if self.getScheme() is None:
-                raise ESipMessageException('Unsupported uri scheme')
+                raise SipException('Unsupported uri scheme')
 
             # user and password
             sepPos = str.find('@')
@@ -92,7 +96,7 @@ class SipUri(Uri):
                 for paramPart in paramParts:
                     paramPair = paramPart.split('=')
                     if len(paramPair) != 2:
-                        raise ESipMessageException('Invalid parameter')
+                        raise SipException('Invalid parameter')
                     self[paramPair[0]] = paramPair[1]
 
     def getHeader(self, name):
@@ -201,7 +205,7 @@ class SipUri(Uri):
 
     def __str__(self):
         if self.getScheme() is None or  self._host is None:
-            raise ESipMessageException('uri attributes (scheme, host) not complete')
+            raise SipException('uri attributes (scheme, host) not complete')
 
         result = self.getScheme() + ':'
     
@@ -264,7 +268,7 @@ class SipAddress():
             elif userAddr.startswith('tel'):
                 self._uri = TelUri(userAddr)
             else:
-                raise ESipMessageException("Invalid address %s" % userAddr)
+                raise SipException("Invalid address %s" % userAddr)
 
     def getDisplayName(self):
         """Gets the display name of this Address, or null if the attribute is not set."""
@@ -356,7 +360,7 @@ class MediaType():
                 self._contentType = type.strip()
                 self._contentSubType= subType.strip()
             else:
-                raise ESipMessageException('Invalid format for media type header')
+                raise SipException('Invalid format for media type header')
 
     def getContentType(self):
         """Gets media type of Header with Content type."""
@@ -467,7 +471,7 @@ class AuthenticationInfoHeader(Header, dict):
             for param in params:
                 (key, sep, value) = param.partition('=')
                 if len(sep) == 0:
-                    raise ESipMessageException("Cannot parse parameter:" + param)
+                    raise SipException("Cannot parse parameter:" + param)
                 # remove quotes
                 value = value.replace('"', '')
                 self[key.strip()] = value.strip()
@@ -519,7 +523,7 @@ class AuthenticationHeader(Header, dict):
                 for param in params:
                     (key, sep, value) = param.partition('=')
                     if len(sep) == 0:
-                        raise ESipMessageException("Cannot parse parameter:" + param)
+                        raise SipException("Cannot parse parameter:" + param)
                     # remove quotes
                     value = value.replace('"', '')
                     self[key.strip()] = value.strip()
@@ -634,7 +638,7 @@ class AuthenticationHeader(Header, dict):
 
     def __str__(self):
         if self._scheme is None:
-            raise ESipMessageException('Authorization scheme is mandatory')
+            raise SipException('Authorization scheme is mandatory')
         result = self.getName() + ': '
         result += self._scheme
     
@@ -717,7 +721,7 @@ class SipAddressHeader(Header, dict):
                 for param in params:
                     (key, sep, value) = param.partition('=')
                     if len(sep) == 0:
-                        raise ESipMessageException()
+                        raise SipException()
                     self[key.strip()] = value.strip()
 
     def getAddress(self):
@@ -780,7 +784,7 @@ class ContentLengthHeader(Header):
             elif body.isdigit():
                 self._contentLength = int(body)
             else:
-                raise ESipMessageException("Invalid header body for Content-length header")
+                raise SipException("Invalid header body for Content-length header")
 
     def getContentLength(self):
         return self._contentLength
@@ -899,7 +903,7 @@ class SipCSeqHeader(Header):
                 self._seqNumber = int(num.strip())
                 self._method = method.strip()
             else:
-                raise ESipMessageException('Invalid format for CSeq header')
+                raise SipException('Invalid format for CSeq header')
 
     def getMethod(self):
         """Gets the method of CSeqHeader"""
@@ -962,7 +966,7 @@ class SipViaHeader(Header, dict):
         if body is not None:
             (address, sep, parameters) = body.partition(';')
             if len(address) == 0:
-                raise ESipMessageException()
+                raise SipException()
             if len(sep) == 0:
                 parameters = None
             
@@ -970,12 +974,12 @@ class SipViaHeader(Header, dict):
             (beg, sep, host) = address.partition(' ') 
             
             if not beg.startswith('SIP/2.0/') or len(sep) == 0:
-                raise ESipMessageException()
+                raise SipException()
 
             # get transport protocol 
             transport = beg[len('SIP/2.0/'):] 
             if transport.lower() not in [Sip.TRANSPORT_UDP, Sip.TRANSPORT_TCP, Sip.TRANSPORT_SCTP]:
-                raise ESipMessageException()
+                raise SipException()
 
             self[SipViaHeader.PARAM_TRANSPORT] = transport 
     
@@ -991,7 +995,7 @@ class SipViaHeader(Header, dict):
                 for pair in pairs:
                     (name, sep, value) = pair.partition('=')    
                     if len(sep) == 0:
-                        raise ESipMessageException()
+                        raise SipException()
                     self[name] = value
 
 
@@ -1157,7 +1161,7 @@ class SipParser():
         '''
 
         if dataBuffer is None:
-            raise ESipMessageException()
+            raise SipException()
 
         # locate a body
         msgBody = None
@@ -1168,13 +1172,13 @@ class SipParser():
                 dataBuffer = dataBuffer[:bodyOffset]
                 break
         if msgBody is None:
-            raise ESipMessageException()
+            raise SipException()
 
         # split message into lines and put aside start line
         lines = dataBuffer.decode('UTF-8').splitlines()
 
         if len(lines) < 2:
-            raise ESipMessageException("Not enough header lines in message")
+            raise SipException("Not enough header lines in message")
 
         # parse first line and get instance of request or response object
         msg = self.parseFirstLine(lines[0]) 
@@ -1208,10 +1212,10 @@ class SipParser():
         if contentLengthHeader is not None:
             contentLength = contentLengthHeader.getContentLength()  
             if contentLength != len(msgBody):
-                raise ESipMessageException("Body length differs from value of Content-length header")
+                raise SipException("Body length differs from value of Content-length header")
         elif msgBody is not None:
             if len(msgBody) > 0:
-                raise ESipMessageException("Body without Content-length header found.")
+                raise SipException("Body without Content-length header found.")
 
         msg.setContent(msgBody)
 
@@ -1224,7 +1228,7 @@ class SipParser():
 
         parts = str.split(' ', 2) 
         if len(parts) != 3:
-            raise ESipMessageException()    
+            raise SipException()    
 
         # check if message is request
         if parts[0].strip() in methodNames:
@@ -1248,7 +1252,7 @@ class SipParser():
             result.setReasonPhrase(parts[2].strip())
             result.setSipVersion(sipVersion)
         else:
-            raise ESipMessageException()
+            raise SipException()
 
         return result
 
@@ -1271,7 +1275,7 @@ class SipParser():
 
     def parseSipVersion(self, str):
         if str != 'SIP/2.0':
-            raise ESipMessageException()
+            raise SipException()
 
         return str
 
@@ -1282,7 +1286,7 @@ class SipParser():
         elif str.startswith('tel'):
             result = TelUri(str)
         else:
-            raise ESipMessageException
+            raise SipException
 
         return result
 
@@ -1498,9 +1502,9 @@ class SipMessage():
             # Bis 09 compatible branch assignment algorithm.
                 # implies that the branch id can be used as a transaction identifier.
             if cSeqHeader is None:
-                raise ESipMessageException('CSeq header is missing')
+                raise SipException('CSeq header is missing')
 
-            if cSeqHeader.getMethod() == SipRequest.METHOD_CANCEL:
+            if cSeqHeader.getMethod() == Sip.METHOD_CANCEL:
                     return (topVia.getBranch() + ':' + cSeqHeader.getMethod()).lower()
             else:
                     return topVia.getBranch().lower()
@@ -1509,7 +1513,7 @@ class SipMessage():
             # from various fields of the request.
             result = ''
             if fromHeader is None or toHeader is None or callIdHeader is None or cSeqHeader is None:
-                raise ESipMessageException('From, To, CallId or CSeq header is missing')
+                raise SipException('From, To, CallId or CSeq header is missing')
 
             if not fromHeader.getTag() is None:
                 result += fromHeader.getTag() + '-'
@@ -1524,8 +1528,8 @@ class SipMessage():
             # if not topVia.getSentBy().hasPort():
                                     #       result += '-5060'
 
-            if cSeqHeader.getMethod() == SipRequest.METHOD_CANCEL:
-                result += SipRequest.METHOD_CANCEL
+            if cSeqHeader.getMethod() == Sip.METHOD_CANCEL:
+                result += Sip.METHOD_CANCEL
 
         return result.lower().replace(':', '-').replace('@', '-') + '-' + SipUtils.generateSignature()
 
@@ -1563,53 +1567,6 @@ class SipMessage():
 class SipRequest(SipMessage):
     """Sip Request"""
 
-    # rfc3261 - confirms that client has received a final Response to an INVITE Request.
-    METHOD_ACK = 'ACK'
-
-    # rfc3261 - Indicates to the server that client wishes to release the call leg.
-    METHOD_BYE = 'BYE'
-
-    # rfc3261 - Cancels a pending User Agent Client Request.
-    METHOD_CANCEL = 'CANCEL'
-
-    # rfc3261 - Indicates that user or service is being invited to participate in a session.
-    METHOD_INVITE = 'INVITE'
-
-    # rfc3261 - Queries a server with regards to its capabilities.
-    METHOD_OPTIONS = 'OPTIONS'
-
-    # rfc3261 - Registers contact information with a SIP server. 
-    METHOD_REGISTER = 'REGISTER'
-
-    # rfc2976 - Used to carry session related control information that is generated during a session.
-    # This functionality is defined in RFC2976.
-    METHOD_INFO = 'INFO'
-
-    # rfc3262 - Similiar in operation to ACK, however specific to the reliability of provisional
-    # Responses. This functionality is defined in RFC3262.
-    METHOD_PRACK = 'PRACK'
-
-    # rfc3311 - Allows a client to update parameters of a session without impacting the state
-    # of a dialog. This functionality is defined in RFC3311.
-    METHOD_UPDATE = 'UPDATE'
-
-    # rfc3265 - Provides an extensible framework by which SIP nodes can request notification
-    # from remote nodes indicating that certain events have occurred. This functionality is defined in RFC3265.
-    METHOD_SUBSCRIBE = 'SUBSCRIBE'
-
-    # rfc3265 - Provides an extensible framework by which SIP nodes can get notification from remote nodes indicating
-    # that certain events have occurred. This functionality is defined in RFC3265.
-    METHOD_NOTIFY = 'NOTIFY'
-
-    # rfc3428 - For sending instant messages using a metaphor similar to that of a two-way pager or SMS enabled
-    # handset. This functionality is defined in RFC3428.
-    METHOD_MESSAGE ='MESSAGE'
-
-    # rfc3515 - requests that the recipient REFER to a resource provided in the request 
-    METHOD_REFER = 'REFER'
-
-    # rfc3903 - for publishing event state 
-    METHOD_PUBLISH = 'PUBLISH'
 
     def __init__(self):
         SipMessage.__init__(self)
@@ -1637,7 +1594,7 @@ class SipRequest(SipMessage):
         #requiredHeaders = [SipFromHeader, SipToHeader, SipCSeqHeader, SipCallIdHeader, MaxForwardsHeader, SipViaHeader]
         requiredHeaders = [SipFromHeader, SipToHeader, SipCSeqHeader, SipCallIdHeader, SipViaHeader]
                     # Contact (only for INVITE)
-        if self._method == SipRequest.METHOD_INVITE:
+        if self._method == Sip.METHOD_INVITE:
             requiredHeaders.append(ContactHeader)
 
         for rh in requiredHeaders:
@@ -1647,16 +1604,11 @@ class SipRequest(SipMessage):
                     found = True
                     break;
             if not found:
-                raise ESipMessageException('Missing required header: ' + rh.__name__)
+                raise SipException('Missing required header: ' + rh.__name__)
 
 class SipResponse(SipMessage):
     """Sip Response"""
 
-    RESPONSE_TRYING = 100
-    RESPONSE_OK = 200
-    RESPONSE_UNAUTHORIZED = 401
-    RESPONSE_PROXY_AUTHENTICATION_REQUIRED = 407
-    
     def __init__(self):
         SipMessage.__init__(self)
         self._statusCode = None 
@@ -1702,12 +1654,12 @@ class MessageFactory():
     @staticmethod
     def createRequestRegister(user):
         if not isinstance(user, SipAddress):
-            raise ESipMessageException("Invalid argument format")
+            raise SipException("Invalid argument format")
 
         requestUri = SipUri('sip:%s' % user.getUri().getHost())
 
         result = SipRequest()
-        result.setMethod(SipRequest.METHOD_REGISTER)
+        result.setMethod(Sip.METHOD_REGISTER)
         result.setRequestUri(requestUri)
 
         fromHeader = SipFromHeader()
@@ -1718,7 +1670,7 @@ class MessageFactory():
         toHeader.setAddress(user)
         result.addHeader(toHeader)
 
-        #result.addHeader(SipCallIdHeader(SipUtils.generateCallIdentifier(hop.getHost())))
+        result.addHeader(SipCallIdHeader(SipUtils.generateCallIdentifier()))
 
         result.addHeader(SipCSeqHeader('1 REGISTER'))
         #viaHeader = SipViaHeader()
@@ -1761,7 +1713,7 @@ class MessageFactory():
     @staticmethod
     def createRequestInvite(user1, user2, hop):
         if not isinstance(user1, SipAddress) or not isinstance(user2, SipAddress):
-            raise ESipMessageException("Invalid argument format")
+            raise SipException("Invalid argument format")
         
         user1Uri = user1.getUri()
         user1SipAddress = SipAddress()
@@ -1774,7 +1726,7 @@ class MessageFactory():
         user2SipAddress.setDisplayName(user2.getDisplayName())
 
         result = SipRequest()
-        result.setMethod(SipRequest.METHOD_INVITE)
+        result.setMethod(Sip.METHOD_INVITE)
         result.setRequestUri(user2Uri)
 
         fromHeader = SipFromHeader()
@@ -1819,7 +1771,7 @@ class MessageFactory():
 
     @staticmethod
     def createRequestAck(inviteRequest):
-        result = MessageFactory.createRequest(copy.deepcopy(inviteRequest.getRequestUri()), SipRequest.METHOD_ACK)
+        result = MessageFactory.createRequest(copy.deepcopy(inviteRequest.getRequestUri()), Sip.METHOD_ACK)
 
         result.addHeader(copy.deepcopy(inviteRequest.getHeaderByType(SipFromHeader)))
         result.addHeader(copy.deepcopy(inviteRequest.getHeaderByType(SipToHeader)))
@@ -2003,11 +1955,6 @@ class UnitTestCase(unittest.TestCase):
         h.setUri('some.uri')
         h.setStale(False)
         str(h)
-
-    def testSipUtils(self):
-        SipUtils.generateCallIdentifier('xyz')
-        SipUtils.generateTag()
-        SipUtils.generateBranchId()
 
     def testMessageFactory(self):
         inv = MessageFactory.createRequestInvite(self.user1, self.user2, self.localHop)
