@@ -7,128 +7,6 @@ import copy
 import re
 #import urlparse
 
-class ESipMessageException(Exception):
-    pass
-
-class ESipMessageNotImplemented(ESipMessageException):
-    pass
-
-class ESipMessageHeaderInvalid(ESipMessageException):
-    pass
-
-class Sip():
-    '''General SIP protocol definitions'''
-
-    # cookie that should be used as a prefix for all branch hashes
-    BRANCH_MAGIC_COOKIE = 'z9hG4bK'
-    
-    @staticmethod
-    def getMethodNames():
-        result = [SipRequest.METHOD_ACK, SipRequest.METHOD_BYE, SipRequest.METHOD_CANCEL, SipRequest.METHOD_INVITE, SipRequest.METHOD_OPTIONS, SipRequest.METHOD_REGISTER,
-            SipRequest.METHOD_INFO, SipRequest.METHOD_PRACK, SipRequest.METHOD_UPDATE, SipRequest.METHOD_SUBSCRIBE, SipRequest.METHOD_NOTIFY, SipRequest.METHOD_MESSAGE, SipRequest.METHOD_REFER]
-        return result
-
-    TRANSPORT_UDP = 'udp'
-    TRANSPORT_TCP = 'tcp'
-    TRANSPORT_SCTP = 'sctp'
-
-    URI_PREFIX_SIP = 'sip'
-    URI_PREFIX_SIPS = 'sips'
-
-    @staticmethod
-    def getUriPrefixes():
-        return [Sip.URI_PREFIX_SIP, Sip.URI_PREFIX_SIPS] 
-    
-    RESPONSE_TRYING = 100
-    RESPONSE_OK = 200
-    RESPONSE_UNAUTHORIZED = 401
-    RESPONSE_PROXY_AUTHENTICATION_REQUIRED = 407
-
-class SipUtils():
-    DIGEST_POOL_SIZE = 20
-
-    @staticmethod
-    def generateCallIdentifier(address):
-        """Generate a call identifier. This is useful when we want to generate a
-         call identifier in advance of generating a message."""
-
-        rndNumber = random.random() * 1000
-        timeStamp = (time.time() % 10) * 100
-        result = "%d%d@%s" % (rndNumber, timeStamp, address)
-
-        return result 
-
-    @staticmethod
-    def generateTag():
-        """Generate a tag for a FROM header or TO header. Just return a random 4
-        digit integer (should be enough to avoid any clashes!) Tags only need to
-        be unique within a call.
-        """
-
-        result = int((time.time() * random.random()) * 1000)
-
-        return str(result)
-
-
-    @staticmethod
-    def generateBranchId():
-        """Generate a cryptographically random identifier that can be used to
-        generate a branch identifier."""
-
-        rndNumber = random.random() * 1000
-        timeStamp = (time.time() % 10) * 100
-        result = "%s%d%d" % (Sip.BRANCH_MAGIC_COOKIE, rndNumber, timeStamp)
-
-        return result
-
-    @staticmethod
-    def generateSignature():
-        """Generate a cryptographically random identifier"""
-        return SipUtils.generateBranchId()
-
-class HttpUtils():
-    @staticmethod
-    def parseHttpList(s):
-        """Parse lists as described by RFC 2068 Section 2.
-
-        In particular, parse comma-separated lists where the elements of
-        the list may include quoted-strings. A quoted-string could
-        contain a comma. A non-quoted string could have quotes in the
-        middle. Neither commas nor quotes count if they are escaped.
-        Only double-quotes count, not single-quotes.
-        """
-
-        res = []
-        part = ''
-        escape = quote = False
-
-        for cur in s:
-            if escape:
-                part += cur
-                escape = False
-                continue
-            if quote:
-                if cur == '\\':
-                    escape = True
-                    continue
-                elif cur == '"':
-                    quote = False
-                part += cur
-                continue
-            if cur == ',':
-                res.append(part)
-                part = ''
-                continue
-            if cur == '"':
-                quote = True
-            part += cur
-
-        # append last part
-        if part:
-            res.append(part)
-            
-        return [part.strip() for part in res] 
-
 class Uri(dict):
     SCHEME_SIP = 'sip'
 
@@ -463,7 +341,7 @@ class Hop():
 
         return result
 
-######## headers ################3
+############ headers ###########
 
 class MediaType():
     """This class represents media type methods for any header that contain content type and content sub-type values."""
@@ -1485,6 +1363,8 @@ class HeaderFactory():
 
         return result
 
+######## messages ################
+
 class SipMessage():
     def __init__(self):
         self.__headers = []
@@ -1550,7 +1430,7 @@ class SipMessage():
     def getFirstLine(self):
         return ''
 
-    def getTopmostViaHeader(self):
+    def getTopViaHeader(self):
         result = None
         for header in self.__headers:
             if isinstance(header, SipViaHeader):
@@ -1605,7 +1485,7 @@ class SipMessage():
         response have the same computed transaction identifier).
         """
 
-        topVia = self.getTopmostViaHeader()
+        topVia = self.getTopViaHeader()
         cSeqHeader = self.getHeaderByType(SipCSeqHeader)
         fromHeader = self.getHeaderByType(SipFromHeader)
         toHeader = self.getHeaderByType(SipToHeader)
@@ -1820,8 +1700,8 @@ class MessageFactory():
         return response
 
     @staticmethod
-    def createRequestRegister(user, hop):
-        if not isinstance(user, SipAddress) or not isinstance(hop, Hop):
+    def createRequestRegister(user):
+        if not isinstance(user, SipAddress):
             raise ESipMessageException("Invalid argument format")
 
         requestUri = SipUri('sip:%s' % user.getUri().getHost())
@@ -1838,38 +1718,21 @@ class MessageFactory():
         toHeader.setAddress(user)
         result.addHeader(toHeader)
 
-        result.addHeader(SipCallIdHeader(SipUtils.generateCallIdentifier(hop.getHost())))
+        #result.addHeader(SipCallIdHeader(SipUtils.generateCallIdentifier(hop.getHost())))
 
         result.addHeader(SipCSeqHeader('1 REGISTER'))
-        viaHeader = SipViaHeader()
-        viaHeader.setTransport(hop.getTransport())
-        viaHeader.setHost(hop.getHost())
-        viaHeader.setPort(hop.getPort())
-        viaHeader.setBranch(SipUtils.generateBranchId());
-        result.addHeader(viaHeader)
+        #viaHeader = SipViaHeader()
+        #viaHeader.setTransport(hop.getTransport())
+        #viaHeader.setHost(hop.getHost())
+        #viaHeader.setPort(hop.getPort())
+        #viaHeader.setBranch(SipUtils.generateBranchId());
+        #result.addHeader(viaHeader)
         result.addHeader(MaxForwardsHeader('70'))
         result.addHeader(ExpiresHeader('3600'))
 
-        contactUri = SipUri()
-        contactUri.setScheme(Uri.SCHEME_SIP)
-        contactUri.setHost(hop.getHost());
-        contactUri.setPort(hop.getPort());
-        contactHeader = ContactHeader()
-        contactHeader.setAddress(contactUri)
-        result.addHeader(contactHeader);
 
         contentLengthHeader = ContentLengthHeader(0)
         result.addHeader(contentLengthHeader);
-
-        # create authorization header
-        #authorizationHeader = AuthorizationHeader()
-        #authorizationHeader.setScheme('Digest')
-        #authorizationHeader.setUserName(user.getAuthUserName())
-        #authorizationHeader.setRealm(user.getSipDomain())
-        #authorizationHeader.setUri(str(requestUri))
-        #authorizationHeader.setNonce('')
-        #authorizationHeader.setResponse('')
-        #result.addHeader(authorizationHeader)
         
         return result
 
@@ -1889,7 +1752,7 @@ class MessageFactory():
         if not fromHeader is None:
             fromHeader.setTag(SipUtils.generateTag())
 
-        topmostViaHeader = result.getTopmostViaHeader()
+        topmostViaHeader = result.getTopViaHeader()
         if not topmostViaHeader is None:
             topmostViaHeader.setBranch(None);
 
@@ -1897,7 +1760,6 @@ class MessageFactory():
 
     @staticmethod
     def createRequestInvite(user1, user2, hop):
-
         if not isinstance(user1, SipAddress) or not isinstance(user2, SipAddress):
             raise ESipMessageException("Invalid argument format")
         
@@ -1966,7 +1828,7 @@ class MessageFactory():
         if not maxForwards is None:
             result.addHeader(copy.deepcopy(maxForwards))
 
-        topVia = inviteRequest.getTopmostViaHeader()
+        topVia = inviteRequest.getTopViaHeader()
         if not topVia is None:
             result.addHeader(copy.deepcopy(topVia))
             
@@ -1975,6 +1837,7 @@ class MessageFactory():
         cSeqHeader.setMethod(result.getMethod())
         result.addHeader(cSeqHeader)
         return result
+
 
 ##### unit test cases #########################################################################
 
