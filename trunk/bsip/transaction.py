@@ -1,10 +1,17 @@
-######## transactions ################
 
-class SipTransaction(object):
-    """Transactions base
+class Transaction():
+    """Transactions base class
 
-    This interface represents a generic transaction interface defining the methods common
-    between client and server transactions."""
+    Transaction occurs between a client and a server and comprises all messages
+    from the first request sent from the client to the server up to a final (non-1xx)
+    response sent from the server to the client. If the request is INVITE and the final
+    response is a non-2xx, the transaction also includes an ACK to the response. The ACK
+    for a 2xx response to an INVITE request is a separate transaction.
+
+    Each transaction is uniquely identified by:
+    * branch-id on the Via header (branch id always starts with `z9hG4bK`)
+    * Cseq header
+    """
 
     def __init__(self, sipStack, originalRequest, transport = None):
         self.branch = None
@@ -13,29 +20,19 @@ class SipTransaction(object):
         self.stack = sipStack
         # transport used for sending/receiving transaction messages
         self.transport = transport
-        self.state = None
 
-class SipTransactionClientNonInvite(SipTransaction):
-    """ Client transaction"""
+class TransactionState():
+    def processResponse(self, response):
+        pass
 
-    LOGGER_NAME = 'SipClientTransaction'
+class TranClientNonInvite(SipTransaction):
+    """Non-Invite client transaction"""
+
+    LOGGER_NAME = 'BSip.TranCliNonInv'
 
     def __init__(self, sipStack, request, lp = None):
-        SipTransaction.__init__(self, sipStack, request, lp)
-
-    def sendAck(self):
-        """Creates a new Ack message from the Request associated with this client transaction."""
-        logger = logging.getLogger(self.LOGGER_NAME)
-        logger.debug('sendAck() Enter')
-
-        ackRequest = MessageFactory.createRequestAck(self.getOriginalRequest())
-        self._sipStack.sendRequest(ackRequest)
-
-        logger.debug('sendAck() Leave')
-
-    def createCancel(self):
-        """Creates a new Cancel message from the Request associated with this client transaction."""
-        raise ENotImplemented()
+        Transaction.__init__(self, sipStack, request, lp)
+        self.state = None
 
     def sendRequest(self, request = None):
         """Sends the Request which created this ClientTransaction.
@@ -151,6 +148,18 @@ class SipTransactionClientNonInvite(SipTransaction):
         logger.debug('processResponse() Leave')
 
         return blockListeners 
+
+class TranClientNonInviteStateTrying(TransactionState):
+    pass
+
+class TranClientNonInviteStateProceeding(TransactionState):
+    pass
+
+class TranClientNonInviteStateCompleted(TransactionState):
+    pass
+
+class TranClientNonInviteStateTerminated(TransactionState):
+    pass
 
 class SipTranClientState():
     pass

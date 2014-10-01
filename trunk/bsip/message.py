@@ -8,6 +8,7 @@ import re
 #import urlparse
 
 from sip import Sip
+from sip import SipException
 from sip import SipUtils
 from sip import HttpUtils
 
@@ -712,9 +713,7 @@ class SipAddressHeader(Header, dict):
         if not body is None:
             # parse address
             (address, sep, parameters) = body.partition(';')
-
             self.__address = SipAddress(address)
-
             # parse parameters
             if len(sep) > 0:
                 params = parameters.split(';')
@@ -773,6 +772,18 @@ class SipFromHeader(SipAddressHeader):
 class ContactHeader(SipAddressHeader):
     def __init__(self, body = None):
         SipAddressHeader.__init__(self, 'Contact' , body)
+
+    def __str__(self):
+        a = self.getAddress()
+        if a is None:
+            raise SipException('Empty address in Contact header')
+
+        result = str(self.getName()) + ': '
+        if a.getDisplayName() is None:
+            result += '<' + str(a.getUri()) + '>'
+        else:
+            result += '"' + a.getDisplayName() + '" <' + str(a.getUri()) + '>'
+        return result
 
 class ContentLengthHeader(Header):
     def __init__(self, body = None):
@@ -1665,6 +1676,7 @@ class MessageFactory():
         fromHeader = SipFromHeader()
         fromHeader.setAddress(user)
         fromHeader.setTag(SipUtils.generateTag())
+
         result.addHeader(fromHeader)
         toHeader = SipToHeader()
         toHeader.setAddress(user)
@@ -1737,7 +1749,7 @@ class MessageFactory():
         toHeader.setAddress(user2SipAddress)
         result.addHeader(toHeader)
 
-        result.addHeader(SipCallIdHeader(SipUtils.generateCallIdentifier(hop.getHost())))
+        result.addHeader(SipCallIdHeader(SipUtils.generateCallIdentifier()))
 
         result.addHeader(SipCSeqHeader('1 INVITE'))
         viaHeader = SipViaHeader('SIP/2.0/UDP some.host')
@@ -1805,6 +1817,14 @@ class UnitTestCase(unittest.TestCase):
         self.localHop = Hop()
         self.localHop.setHost('127.0.0.1')
         self.localHop.setPort(5060)
+
+        self.userBob = SipAddress()
+        self.userBobUri = SipUri()
+        self.userBobUri.setScheme(Uri.SCHEME_SIP)
+        self.userBobUri.setUser(self.USR_BOB_USERNAME)
+        self.userBobUri.setHost(self.USR_BOB_DOMAIN)
+        self.userBob.setDisplayName(self.USR_BOB_DISPLAYNAME)
+        self.userBob.setUri(self.userBobUri)
 
         self.user1 = SipAddress()
         self.user1Uri = SipUri()
@@ -1925,6 +1945,15 @@ class UnitTestCase(unittest.TestCase):
         h.setNC(34)
         str(h)
 
+    def testContactHeader(self):
+        h = ContactHeader()
+        self.assertRaises(SipException, str, h)
+        h.setAddress(self.userBob)
+        self.assertEqual(str(h), 'Contact: ' + self.USR_BOB_ADDR)
+
+        h.getAddress().setDisplayName(None)
+        self.assertEqual(str(h), 'Contact: <' + self.USR_BOB_SHORT + '>')
+
     def testContentLengthHeader(self):
         h = ContentLengthHeader("34")
         self.assertEqual(h.getContentLength(), 34)
@@ -1993,21 +2022,21 @@ class UnitTestCase(unittest.TestCase):
         self.assertEqual(headers[1].getAddress().getUri().getHost(), "bell-telephone.com")
 
     def testSipMessageParserOptions(self):
-        f = open('data/sip_options.txt', 'rb')
+        f = open('../data/sip_options.txt', 'rb')
         msg = f.read()
         f.close()
         sipParser = SipParser()
         sipParser.parseSIPMessage(msg) 
 
     def testSipMessageParserInvite(self):
-        f = open('data/sip_invite.txt', 'rb')
+        f = open('../data/sip_invite.txt', 'rb')
         msg = f.read()
         f.close()
         sipParser = SipParser()
         sipParser.parseSIPMessage(msg) 
 
     def testSipMessageParser403Forbidden(self):
-        f = open('data/sip_register_403_forbidden.txt', 'rb')
+        f = open('../data/sip_register_403_forbidden.txt', 'rb')
         msg = f.read()
         f.close()
         sipParser = SipParser()

@@ -1,7 +1,7 @@
-import hashlib
+#import hashlib
 from xml.dom import minidom
 import unittest
-import sipmessage
+#import sipmessage
 
 class AccountManager(object):
 	def __init__(self):
@@ -71,52 +71,6 @@ class AccountManager(object):
 					if not user.getUri() is None:
 						self.add(user)
 
-class User(object):
-	def __init__(self):
-		self._address = None
-		self._hop = None
-		self._digestUserName = None
-		self._digestPassword = None
-
-	def setAddress(self, address):
-		self._address = address
-
-	def getAddress(self):
-		return self._address
-
-	def setUri(self, uri):
-		self._address.setUri(uri)
-
-	def getUri(self):
-		return self._address.getUri() if not self._address is None else None
-
-	def setHop(self, hop):
-		self._hop = hop
-
-	def getHop(self):
-		return self._hop	
-
-	def getDigestUser(self):
-		"""Returns the name of the user that these credentials relate to."""
-		return self._digestUser
-
-	def setDigestUser(self, name):
-		self._digestUser = name 
-
-	def getDigestPassword(self):
-		"""Returns a password associated with this set of credentials."""
-		return self._digestPassword
-
-	def setDigestPassword(self, password):
-		self._digestPassword = password
-
-	def getDigestHash(self):
-		"""Get the MD5(userName:sipdomain:password)"""
-		p = self._digestUser + ':' + self._address.getUri().getHost() + ':' + self._digestPassword
-		m = hashlib.md5()
-		m.update(p)
-		return m.hexdigest()
-
 def _xmlNodeGetText(node):
 	rc = []
 	for node in node.childNodes:
@@ -127,16 +81,6 @@ def _xmlNodeGetText(node):
 ##### unit test cases #########################################################################
 
 class UnitTestCase(unittest.TestCase):
-
-	def testUser(self):
-		u = User()
-		#u.getUri().setUser('x')
-		#u.getAddress().setDisplayName('x')
-		#u.getUri().setSipDomain('x')
-		#u.setAuthUserName('x')
-		#u.setAuthPassword('x')
-		#u.getHashUserDomainPassword()
-
 	def testAccountManager(self):
 		src  = "<accounts>"
 		src += "	<account>"
@@ -174,6 +118,4 @@ def suite():
 
 if __name__ == '__main__':
 	unittest.TextTestRunner(verbosity=2).run(suite())
-
-
 
