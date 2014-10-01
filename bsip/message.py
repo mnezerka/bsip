@@ -1487,62 +1487,27 @@ class SipMessage():
         return []
 
     def getTransactionId(self):
-        """Generate (compute) a transaction ID unique for this SIP message.
-
-        return: A string containing the concatenation of various portions of the From,To,Via and
-        RequestURI portions of this message as specified in RFC 2543: All responses to a
-        request contain the same values in the Call-ID, CSeq, To, and From fields (with the
-        possible addition of a tag in the To field (section 10.43)). This allows responses
-        to be matched with requests.
-
-        return: A string that can be used as a transaction identifier for this message. This can be
-        used for matching responses and requests (i.e. an outgoing request and its matching
-        response have the same computed transaction identifier).
-        """
+        """Generate (compute) a transaction ID unique for this SIP message."""
 
         topVia = self.getTopViaHeader()
         cSeqHeader = self.getHeaderByType(SipCSeqHeader)
-        fromHeader = self.getHeaderByType(SipFromHeader)
-        toHeader = self.getHeaderByType(SipToHeader)
-        callIdHeader = self.getHeaderByType(SipCallIdHeader)
 
         # Have specified a branch Identifier so we can use it to identify
         # the transaction. BranchId is not case sensitive.
         # Branch Id prefix is not case sensitive.
-        if not topVia is None and not topVia.getBranch() is None:
-            # Bis 09 compatible branch assignment algorithm.
-                # implies that the branch id can be used as a transaction identifier.
-            if cSeqHeader is None:
-                raise SipException('CSeq header is missing')
+        if topVia is None:
+            raise SipException('Missing top Via header')
 
-            if cSeqHeader.getMethod() == Sip.METHOD_CANCEL:
-                    return (topVia.getBranch() + ':' + cSeqHeader.getMethod()).lower()
-            else:
-                    return topVia.getBranch().lower()
+        if topVia.getBranch() is None:
+            raise SipException('Missing branch in top Via header')
+
+        if cSeqHeader is None:
+            raise SipException('CSeq header is missing')
+
+        if cSeqHeader.getMethod() == Sip.METHOD_CANCEL:
+            return (topVia.getBranch() + ':' + cSeqHeader.getMethod()).lower()
         else:
-            # old style client so construct the transaction identifier
-            # from various fields of the request.
-            result = ''
-            if fromHeader is None or toHeader is None or callIdHeader is None or cSeqHeader is None:
-                raise SipException('From, To, CallId or CSeq header is missing')
-
-            if not fromHeader.getTag() is None:
-                result += fromHeader.getTag() + '-'
-            if not callIdHeader is None:
-                cid = callIdHeader.getCallId()
-                result += cid + '-'
-            result += str(cSeqHeader.getSeqNumber()) + '-' + cSeqHeader.getMethod()
-
-            # TODO:
-            #if not topVia is None:
-            # result += '-' + topVia.getSentBy().encode()
-            # if not topVia.getSentBy().hasPort():
-                                    #       result += '-5060'
-
-            if cSeqHeader.getMethod() == Sip.METHOD_CANCEL:
-                result += Sip.METHOD_CANCEL
-
-        return result.lower().replace(':', '-').replace('@', '-') + '-' + SipUtils.generateSignature()
+            return topVia.getBranch().lower()
 
     def getDialogId(self, isServerTransaction):
         '''Get A dialog identifier constructed from this messsage.
