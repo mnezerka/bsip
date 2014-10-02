@@ -341,7 +341,7 @@ class Module():
         pass
 
     # Called on transaction state changed
-    def onTsxState(tsx):
+    def onTranState(self, tran):
         pass
 
 class ModuleSipLog(Module):

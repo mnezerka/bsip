@@ -25,7 +25,7 @@ class UAC(stack.Module):
 
     def register(self):
         regRequest = message.MessageFactory.createRequestRegister(self.user.getAddress())
-        trans = transaction.TranClientNonInvite(self.stack, regRequest, self.user.getProxy())
+        trans = transaction.TranClientNonInvite(self.stack, self, regRequest, self.user.getProxy())
         trans.sendRequest()
        
     # Called on rx response
@@ -44,4 +44,8 @@ class UAC(stack.Module):
             print "finished"
 
         return False
+
+    def onTranState(self, tran):
+        print 'Transaction state have changed to ', tran.state.getId()
+
 
