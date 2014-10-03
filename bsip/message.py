@@ -1194,31 +1194,56 @@ class SipParser():
         # parse first line and get instance of request or response object
         msg = self.parseFirstLine(lines[0]) 
 
-        # convert multiline headers into one-line header
-        i = 1
-        while i < len(lines):
-            if len(lines[i]) == 0:
+        # parse headers
+        headersData = []
+        for line in lines[1:]:
+            # end on first empty line 
+            if len(line) == 0:
                 break
-            if lines[i][0] in (' ', '\t'):
-                lines[i - 1] += ' ' + lines[i].strip()
-                del lines[i]
-            else:
-                i += 1
+
+            # process folded headers (split into more lines)
+            if line[0] in (' ', '\t'):
+                if len(headersData) == 0:
+                    raise SipException('Invalid whitespace characters found while parsing headers') 
+                lastHeaderData = headersData.pop() 
+                lastHeaderData[1] += ' ' + line.strip()
+                continue 
+            
+            headerParts = re.search('([^:]+) *:([ \t]*)(.+)', line)
+            if headerParts is None:
+                raise SipException('Bad header: %s' % line)
+            headerName = headerParts.group(1)
+            headerValIndent = headerParts.group(2)
+            headerValue = headerParts.group(3)
+
+            # convert 2nd type of multiline headers into one-line header
+            # h1: xxx
+            # h1:  yyy
+            # should be parsed as h1: xxx yyy
+            if len(headersData) > 0:
+                # get previous header
+                lastHeaderDataIx = len(headersData) - 1
+                lastHeaderData = headersData[lastHeaderDataIx]
+                # if header name matches and indent of this header is greater than prvious 
+                if lastHeaderData[0] == headerName and len(lastHeaderData[2]) < len(headerValIndent):
+                    headersData[lastHeaderDataIx][1] += ', ' + headerValue.strip() 
+                    #print headersData[lastHeaderDataIx][1] 
+                    continue
+
+            headersData.append([headerName, headerValue, headerValIndent])
+
+        #for hd in headersData:
+        #    print hd
 
         # parse individual headers
         contentLengthHeader = None
-
-        for line in lines[1:]:
-            try:
-                headers = self.parseHeader(line)
-                for header in headers:
-                        if isinstance(header, ContentLengthHeader):
-                                contentLengthHeader = header
-                        msg.addHeader(header)
-            except ESipMessageHeaderInvalid:
-                pass
-            except ValueError:
-                pass
+        for headerData in headersData:
+            headers = self.parseHeader(headerData[0], headerData[1])
+            #print headers
+            for header in headers:
+                if isinstance(header, ContentLengthHeader):
+                    contentLengthHeader = header
+                msg.addHeader(header)
 
         if contentLengthHeader is not None:
             contentLength = contentLengthHeader.getContentLength()  
@@ -1267,20 +1292,17 @@ class SipParser():
 
         return result
 
-    def parseHeader(self, str):
+    def parseHeader(self, headerName, headerValues):
         result = []
-
-        headerParts = str.split(':', 1) 
-        if len(headerParts) != 2:
-                raise ESipMessageHeaderInvalid()
-
-        headerName = headerParts[0].strip().lower()
-        headerValues = headerParts[1].strip()
-
-        # check for multiple header values (comma separated) 
-        headerValuesParts = re.split(r"[^\\],", headerValues) 
+        headerValues = headerValues.strip()
+        # check for multiple header values (comma separated). This is not allowed for some headers
+        # since their grammar doesn't follow form listed in SIP RFC 7.3
+        if headerName.lower() in ['www-authenticate', 'authorization', 'proxy-authenticate', 'proxy-Authorization']: 
+            headerValuesParts = [headerValues]
+        else:
+            headerValuesParts = re.split(r"[^\\],", headerValues) 
         for headerValue in headerValuesParts:
-                result.append(HeaderFactory.createHeaderFromData(headerName, headerValue))
+            result.append(HeaderFactory.createHeaderFromData(headerName, headerValue))
 
         return result 
 
@@ -1413,6 +1435,7 @@ class SipMessage():
         for header in self.__headers:
             if isinstance(header, type):
                 result = header
+                break
         return result
 
     def getHeadersByType(self, type):
@@ -1853,19 +1876,19 @@ class UnitTestCase(unittest.TestCase):
         m.setContent(self.CONTENT)
 
         m = SipMessage()
+
         fh = SipFromHeader('sip:alice@blue.com')
         m.addHeader(fh)
         th = SipToHeader('sip:bob@blue.com')
         m.addHeader(th)
         cih = SipCallIdHeader('callid')
         m.addHeader(cih)
+        tv = SipViaHeader('SIP/2.0/UDP some.host;branch=z9hG4bKsomebranch')
+        m.addHeader(tv)
         cseq = SipCSeqHeader('34 REGISTER')
         m.addHeader(cseq)
         m.setContent(self.CONTENT)
-        m.getTransactionId()
 
-        tv = SipViaHeader('SIP/2.0/UDP some.host;branch=z9hG4bKsomebranch')
-        m.addHeader(tv)
         m.getTransactionId()
 
     def testMediaType(self):
@@ -1977,7 +2000,7 @@ class UnitTestCase(unittest.TestCase):
 
     def testSipMessageParserMultipleHeaderValues(self):
         sipParser = SipParser()
-        headers = sipParser.parseHeader("Contact: \"Mr. Watson\" <sip:watson@worcester.bell-telephone.com>;q=0.7; expires=3600, \"Mr. Wa\,t\:s\=on\" <sip:watson@bell-telephone.com> ;q=0.1")
+        headers = sipParser.parseHeader('Contact', "\"Mr. Watson\" <sip:watson@worcester.bell-telephone.com>;q=0.7; expires=3600, \"Mr. Wa\,t\:s\=on\" <sip:watson@bell-telephone.com> ;q=0.1")
         self.assertEqual(len(headers), 2)
         self.assertEqual(headers[0].getAddress().getDisplayName(), "Mr. Watson")
         self.assertEqual(headers[0].getAddress().getUri().getUser(), "watson")
@@ -2006,7 +2029,18 @@ class UnitTestCase(unittest.TestCase):
         f.close()
         sipParser = SipParser()
         sipParser.parseSIPMessage(msg) 
-    
+
+    def testSipMessageParser401Unauthorized(self):
+        f = open('../data/sip_register_401.txt', 'rb')
+        rawData = f.read()
+        f.close()
+        sipParser = SipParser()
+        msg = sipParser.parseSIPMessage(rawData) 
+        authHeaders = msg.getHeadersByType(AuthenticationHeader)
+        self.assertEquals(len(authHeaders), 1)
+        authHeader = authHeaders[0]
+        print authHeader.getRealm()
+
 def suite():
     suite = unittest.TestLoader().loadTestsFromTestCase(UnitTestCase)
     return suite

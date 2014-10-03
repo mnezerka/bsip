@@ -69,6 +69,31 @@ class Transaction():
     * Cseq header
     """
 
+    # For UAC, before any message is sent.
+    STATE_NEW = 'new' 
+
+    # For UAC, just after request is sent.
+    STATE_CALLING = 'calling'
+
+    # For UAS, just after request is received.
+    STATE_TRYING = 'trying'
+
+    # For UAS/UAC, after provisional response.
+    STATE_PROCEEDING = 'proceeding'
+
+    # For UAS/UAC, after final response.
+    STATE_COMPLETED = 'completed'
+
+    # For UAS, after ACK is received.
+    STATE_CONFIRMED = 'confirmed'
+
+    # For UAS/UAC, before it is destroyed.
+    STATE_TERMINATED = 'terminated'
+
+    # For UAS/UAC, will be destroyed now.
+    STATE_DESTROYED = 'destroyed'
+
+
     def __init__(self, stack, module, request, destination, transport = None):
         """Constructor"""
 
@@ -99,6 +124,9 @@ class Transaction():
         # instance of the transaction state class
         self.state = TransactionState(self) 
 
+        # last response received
+        self.lastResponse = None
+
     def getId(self):
         return self.originalRequest.getTransactionId()
 
@@ -106,6 +134,12 @@ class Transaction():
         self.logger.debug('State transition: %s -> %s' % (self.state.getId(), state.getId())) 
         self.state = state
         self.module.onTranState(self)
+
+    def getLastStatusCode(self):
+        result = None
+        if not self.lastResponse is None:
+            result = self.lastResponse.getStatusCode()
+        return result
 
 ######### Non Invite Client Transaction
 
@@ -151,7 +185,7 @@ class TranClientNonInviteStateNew(TransactionState):
     LOGGER_NAME = 'BSip.TranCliNonInv.New'
 
     def getId(self):
-        return 'new'
+        return Transaction.STATE_NEW 
 
     def sendRequest(self):
         txData = SipTxData()
@@ -179,9 +213,10 @@ class TranClientNonInviteStateTrying(TransactionState):
     LOGGER_NAME = 'BSip.TranCliNonInv.Trying'
 
     def getId(self):
-        return 'trying'
+        return Transaction.STATE_TRYING
 
     def onRxResponse(self, rxData):
+        self.transaction.lastResponse = rxData.msg
         code = rxData.msg.getStatusCode()
         if code / 100 == 1:
             self.transaction.setState(TranClientNonInviteStateProceeding(self.transaction))
@@ -195,21 +230,21 @@ class TranClientNonInviteStateProceeding(TransactionState):
     LOGGER_NAME = 'BSip.TranCliNonInv.Proceeding'
 
     def getId(self):
-        return 'proceeding'
+        return Transaction.STATE_PROCEEDING
 
 class TranClientNonInviteStateCompleted(TransactionState):
 
     LOGGER_NAME = 'BSip.TranCliNonInv.Completed'
 
     def getId(self):
-        return 'completed'
+        return Transaction.STATE_COMPLETED
 
 class TranClientNonInviteStateTerminated(TransactionState):
 
     LOGGER_NAME = 'BSip.TranCliNonInv.Terminated'
 
     def getId(self):
-        return 'terminated'
+        return Transaction.STATE_TERMINATED
 
 ######### Invite Client Transaction
 

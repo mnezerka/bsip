@@ -1,0 +1,14 @@
+SIP/2.0 401 Unauthorized
+From: "Michal Nezerka" <sip:michal.nezerka@iptel.org>;tag=625171236132
+To: "Michal Nezerka" <sip:michal.nezerka@iptel.org>;tag=12E48DA0-542EFD6E000DF35B-634AF700
+Call-Id: 96882
+CSeq: 1 REGISTER
+Via: SIP/2.0/UDP 192.168.0.104:5060;received=94.113.52.144;branch=z9hG4bK875882
+expires: 600
+min-expires: 240
+WWW-Authenticate: Digest realm="iptel.org"
+WWW-Authenticate:  nonce="VC79plQu/WrHIzWfYRrh7RSI+mhGyp0S"
+server: ser (3.3.0-pre1 (i386/linux))
+warning: 392 192.168.0.85:5060 "Noisy feedback tells:  pid=1450 req_src_ip=192.168.0.155 req_src_port=5060 in_uri=sip:iptel.org out_uri=sip:iptel.org via_cnt==1"
+Content-Length: 0
+
