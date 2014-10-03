@@ -9,6 +9,7 @@ import stack
 import user
 import auth
 import transaction
+from transaction import Transaction
 from bsip.sip import Sip
 
 class UAC(stack.Module):
@@ -48,4 +49,14 @@ class UAC(stack.Module):
     def onTranState(self, tran):
         print 'Transaction state have changed to ', tran.state.getId()
 
+        if tran.state.getId() == Transaction.STATE_COMPLETED:
+            print tran.getLastStatusCode()
+
+            # check if authentication is required
+            if tran.getLastStatusCode() == 401:
+                regRequest2 = self.digestAuthenticator.handleChallenge(tran.lastResponse, tran.originalRequest)
+                print regRequest2
+                #trans = transaction.TranClientNonInvite(self.stack, self, regRequest, self.user.getProxy())
+                #trans.sendRequest()
+     
 
