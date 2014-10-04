@@ -1,6 +1,8 @@
 
 import copy
 import logging
+import unittest
+import hashlib
 
 from sip import Sip, SipUtils
 import message
@@ -142,21 +144,21 @@ class DigestAuthenticator():
 
         authHeader.setScheme('Digest')
         authHeader.setUserName(user.getDigestUser())
-        authHeader.setRealm(authParams[Header.PARAM_REALM])
-        authHeader.setNonce(authParams[Header.PARAM_NONCE])
-        authHeader.setUri(authParams[Header.PARAM_URI])
+        authHeader.setRealm(authParams[message.Header.PARAM_REALM])
+        authHeader.setNonce(authParams[message.Header.PARAM_NONCE])
+        authHeader.setUri(authParams[message.Header.PARAM_URI])
         authHeader.setResponse(response)
 
-        if not authParams[Header.PARAM_ALGORITHM] is None:
-            authHeader.setAlgorithm(authParams[Header.PARAM_ALGORITHM])
+        if not authParams[message.Header.PARAM_ALGORITHM] is None:
+            authHeader.setAlgorithm(authParams[message.Header.PARAM_ALGORITHM])
 
-        if not authParams[Header.PARAM_OPAQUE] is None:
-            authHeader.setOpaque(authParams[Header.PARAM_OPAQUE])
+        if not authParams[message.Header.PARAM_OPAQUE] is None:
+            authHeader.setOpaque(authParams[message.Header.PARAM_OPAQUE])
 
-        if not authParams[Header.PARAM_QOP] is None:
-            authHeader.setQop(authParams[Header.PARAM_QOP])
-            authHeader.setNC(authParams[Header.PARAM_NC])
-            authHeader.setCNonce(authParams[Header.PARAM_CNONCE])
+        if not authParams[message.Header.PARAM_QOP] is None:
+            authHeader.setQop(authParams[message.Header.PARAM_QOP])
+            authHeader.setNC(authParams[message.Header.PARAM_NC])
+            authHeader.setCNonce(authParams[message.Header.PARAM_CNONCE])
         authHeader.setResponse(response)
         self.logger.debug('updateAuthorizationHeader() Leave')
 
@@ -189,11 +191,11 @@ class DigestAuthenticator():
                 callId = msg.getCallId()
                 if not authInfoHeader is None and not callId is None:
                     nextNonce = authInfoHeader.getNextNonce()
-                    if callId in self._cachedCredentials:
-                        if "last" in self._cachedCredentials[callId]:
+                    if callId in self.cachedCredentials:
+                        if "last" in self.cachedCredentials[callId]:
                             self.logger.debug("updating old nonce stored for call-id %s read from authentication-info header" % callId)
-                            self._cachedCredentials[callId]["last"][Header.PARAM_NONCE] = nextNonce
-                            self._cachedCredentials[callId]["last"][Header.PARAM_NC] = 0 
+                            self.cachedCredentials[callId]["last"][Header.PARAM_NONCE] = nextNonce
+                            self.cachedCredentials[callId]["last"][Header.PARAM_NC] = 0 
 
         self.logger.debug('onMessageReceive() Leave')
 
@@ -203,38 +205,37 @@ class DigestAuthenticator():
         self.logger = logging.getLogger(self.LOGGER_NAME)
         self.logger.debug('onMessageSend() Enter')
 
-        if not isinstance(msg, SipRequest):
-            return
+        assert isinstance(msg, message.SipRequest)
 
         #fromHeader = msg.getHeaderByType(SipFromHeader)
         #fromUri = fromHeader.getAddress().getUri()
         cacheId = msg.getCallId()
         #cacheId = "%s@%s" % (fromUri.getUser(), fromUri.getHost())
-        if cacheId in self._cachedCredentials:
+        if cacheId in self.cachedCredentials:
             self.logger.debug("found cache entry for cache id %s" % cacheId)
-            allRealmAuthParams = self._cachedCredentials[cacheId]
+            allRealmAuthParams = self.cachedCredentials[cacheId]
 
-            authHeaders = msg.getHeadersByType(AuthorizationHeader) + msg.getHeadersByType(ProxyAuthorizationHeader)
+            authHeaders = msg.getHeadersByType(message.AuthorizationHeader) + msg.getHeadersByType(message.ProxyAuthorizationHeader)
             for authHeader in authHeaders:
                 realm = authHeader.getRealm()
                 self.logger.debug("processing authorization header identified by realm %s" % realm)
                 if not realm is None and realm in allRealmAuthParams:
                     self.logger.debug("realm %s found in cache" % realm)
                     authParams = allRealmAuthParams[realm]
-                    authParams[Header.PARAM_NC] = authParams[Header.PARAM_NC] + 1
+                    authParams[message.Header.PARAM_NC] = authParams[message.Header.PARAM_NC] + 1
 
                     user = authParams["user"]
 
                     response = MessageDigestAlgorithm.calculateResponse(
-                        authParams[Header.PARAM_ALGORITHM],
+                        authParams[message.Header.PARAM_ALGORITHM],
                         user.getDigestHash(),
-                        authParams[Header.PARAM_NONCE],
-                        authParams[Header.PARAM_NC],
-                        authParams[Header.PARAM_CNONCE],
+                        authParams[message.Header.PARAM_NONCE],
+                        authParams[message.Header.PARAM_NC],
+                        authParams[message.Header.PARAM_CNONCE],
                         msg.getMethod(),
-                        authParams[Header.PARAM_URI],
+                        authParams[message.Header.PARAM_URI],
                         msg.getContent(),
-                        authParams[Header.PARAM_QOP])
+                        authParams[message.Header.PARAM_QOP])
 
                     self.updateAuthorizationHeader(authHeader, authParams, response)
 
@@ -317,4 +318,19 @@ class MessageDigestAlgorithm():
     def KD(secret, data):
         """Defined in rfc 2617 as KD(secret, data) = H(concat(secret, ":", data))"""
         return MessageDigestAlgorithm.H(secret + ':' + data)
+
+#### unit tests ##########################
+
+class UnitTestCase(unittest.TestCase):
+    def test01(self):
+        da = DigestAuthenticator(None)
+
+def suite():
+    suite = unittest.TestLoader().loadTestsFromTestCase(UnitTestCase)
+    return suite
+
+if __name__ == '__main__':
+    unittest.TextTestRunner(verbosity=2).run(suite())
+
+
 

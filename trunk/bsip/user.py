@@ -1,4 +1,5 @@
 import unittest
+import hashlib
 
 class User():
     def __init__(self):
@@ -31,10 +32,10 @@ class User():
 
     def getDigestUser(self):
         """Returns the name of the user that these credentials relate to."""
-        return self._digestUser
+        return self._digestUserName
 
     def setDigestUser(self, name):
-        self._digestUser = name 
+        self._digestUserName = name 
 
     def getDigestPassword(self):
         """Returns a password associated with this set of credentials."""
@@ -45,7 +46,7 @@ class User():
 
     def getDigestHash(self):
         """Get the MD5(userName:sipdomain:password)"""
-        p = self._digestUser + ':' + self._address.getUri().getHost() + ':' + self._digestPassword
+        p = self._digestUserName + ':' + self._address.getUri().getHost() + ':' + self._digestPassword
         m = hashlib.md5()
         m.update(p)
         return m.hexdigest()

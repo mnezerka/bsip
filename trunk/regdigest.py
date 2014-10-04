@@ -59,6 +59,8 @@ if __name__ == '__main__':
     user.setUri(user1Uri)
     #self.user.setProxy(('127.0.0.1', 5060))
     user.setProxy(('sip.iptel.org', 5060))
+    user.setDigestUser("michal.nezerka")
+    user.setDigestPassword("blueboy76")
 
     uac = bsip.uac.UAC(user)
     stack.registerModule(uac)
@@ -68,7 +70,12 @@ if __name__ == '__main__':
     uac.register()
 
     while True:
+
         stack.loop()
         time.sleep(0.1)
 
+        if uac.getState() == bsip.uac.UAC.STATE_REGISTERED:
+            uac.deRegister()     
+        elif uac.getState() == bsip.uac.UAC.STATE_NOT_REGISTERED:
+            break
 
