@@ -1,0 +1,19 @@
+<accounts>
+	<account>
+		<sip-uri>sip:ITLL000001@brn56.iit.ims</sip-uri>
+		<display-name>ITLL000001</display-name>
+		<net-addr>64.197.0.1:5060</net-addr>
+		<digest-user>blues</digest-user>
+		<digest-password>bluep</digest-password>
+        <proxy>21.56.31.72:5060</proxy>
+	</account>
+	<account>
+		<sip-uri>sip:michal.nezerka@iptel.org</sip-uri>
+		<display-name>Michal Nezerka</display-name>
+		<net-addr>192.168.0.104:5065</net-addr>
+		<digest-user>michal.nezerka</digest-user>
+		<digest-password>xxxxxxx</digest-password>
+        <proxy>sip.iptel.org:5060</proxy>
+	</account>
+</accounts>
+

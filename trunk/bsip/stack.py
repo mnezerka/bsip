@@ -19,7 +19,6 @@ from sip import SipUtils
 import message
 from message import SipRequest
 from message import SipResponse
-#import transaction
 
 class SipRxData():
     """Received data"""
@@ -187,22 +186,22 @@ class TransportUdp(Transport, IpSocketListener):
     LOGGER_NAME = 'BSip.TransortUdp' 
     type = Sip.TRANSPORT_UDP
 
-    def __init__(self, stack, localAddress, port):
+    def __init__(self, stack, hop):
+        assert isinstance(hop, message.Hop)
         Transport.__init__(self, stack)
-        self.localAddress = localAddress
-        self.port = port
+        self.hop = hop 
         self.logger = logging.getLogger(self.LOGGER_NAME)
 
-        self.logger.debug('Creating listening UDP socket')
+        self.logger.debug('Creating listening UDP socket for address: ' + str(self.hop))
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.socket.bind((localAddress, port))
+        self.socket.bind((self.hop.getHost(), self.hop.getPort()))
 
         self.stack.transportManager.registerTransport(self)
         self.stack.ipDispatcher.registerListeningSocket(self.socket, self)
 
     def getId(self):
-        return 'udp-%s-%d' % (self.localAddress, self.port) 
+        return 'udp-%s-%d' % (self.hop.getHost(), self.hop.getPort()) 
 
     def onData(self, data, sourceAddress, destinationAddress):
         self.logger.debug('Received data of length %d from %s to %s' % (len(data), sourceAddress, destinationAddress))
@@ -226,14 +225,14 @@ class TransportUdp(Transport, IpSocketListener):
         sendSock = self.socket
         #sendSock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         #sendSock.bind((self.localAddress, 0))
-        sendSock.sendto(txData.data, txData.dest)
+        sendSock.sendto(txData.data, (txData.dest.getHost(), txData.dest.getPort()))
         #sendSock.close()
 
     def getViaHeader(self):
         topVia = message.SipViaHeader()
-        topVia.setTransport(Sip.TRANSPORT_UDP)
-        topVia.setHost(self.localAddress)
-        topVia.setPort(self.port)
+        topVia.setTransport(self.hop.getTransport())
+        topVia.setHost(self.hop.getHost())
+        topVia.setPort(self.hop.getPort())
         return topVia 
 
 class TransportTcp(Transport, IpSocketListener):
@@ -449,6 +448,8 @@ class SipStack():
         # allow ip dispatcher to do io operations on all sockets
         self.ipDispatcher.doSelect()
 
+        # TODO - process all items in stack queue
+
     def registerModule(self, module):
         self.logger.debug('Registering module %s (priority %d)' % (module.getId(), module.priority))
         self.modules.append(module)
@@ -532,24 +533,24 @@ class SipStack():
         else:
             if transport.type != topVia.getTransport():
                 topVia.setTransport(transport.type)
-            if transport.localAddress != topVia.getHost():
-                topVia.setHost(transport.localAddress)
-            if transport.port != topVia.getPort():
-                topVia.setPort(transport.port)
+            if transport.hop.getHost() != topVia.getHost():
+                topVia.setHost(transport.hop.getHost())
+            if transport.hop.getPort() != topVia.getPort():
+                topVia.setPort(transport.hop.getPort())
 
         # get message contact header
         contactHeader = request.getHeaderByType(message.ContactHeader)
         if contactHeader is None:
             contactHeader = message.ContactHeader()
+            request.addHeader(contactHeader);
 
         contactUri = message.SipUri()
         contactUri.setScheme(message.Uri.SCHEME_SIP)
-        contactUri.setHost(transport.localAddress);
-        contactUri.setPort(transport.port);
+        contactUri.setHost(transport.hop.getHost())
+        contactUri.setPort(transport.hop.getPort())
         contactAddress = message.SipAddress()
         contactAddress.setUri(contactUri)
         contactHeader.setAddress(contactAddress)
-        request.addHeader(contactHeader);
 
     def acquireTransport(self, transportType = None):
         return self.transportManager.acquiureTransport(transportType)

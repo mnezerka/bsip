@@ -11,6 +11,8 @@ from sip import Sip
 from sip import SipException
 from sip import SipUtils
 from sip import HttpUtils
+from sip import Hop 
+from user import User
 
 class Uri(dict):
     SCHEME_SIP = 'sip'
@@ -63,7 +65,7 @@ class SipUri(Uri):
             for px in Sip.getUriPrefixes():
                 if str.startswith(px + ':'):
                     self.setScheme(px)
-                    str = str[len(px) + 1:]
+                    str = str[len(px) + 1:].strip()
                     break 
             if self.getScheme() is None:
                 raise SipException('Unsupported uri scheme')
@@ -296,54 +298,6 @@ class SipAddress():
             result = str(self._uri)
         else:
             result = '"' + self._displayName + '" <' + str(self._uri) + '>'
-        return result
-
-class Hop():
-    """Network address (host, port, transport) in format host[:port][;transport=udp|tcp]"""
-    def __init__(self, addr = None, transport = None):
-        self._host = None
-        self._port = None
-        self._transport = transport
-        if not addr is None:
-            self.parse(addr)
-
-    def parse(self, addr):
-        if type(addr) is tuple:
-            (self._host, self._port) = addr 
-        elif not addr is None:
-            parts = addr.split(':', 1)
-            if len(parts) == 1:
-                self._host = parts[0]
-            elif len(parts) == 2 and parts[1].isdigit():
-                self._host = parts[0]
-                self._port = int(parts[1])
-
-    def getHost(self):
-        return self._host
- 
-    def setHost(self, host):
-        self._host = host
-
-    def getPort(self):
-        return self._port
-
-    def setPort(self, port):
-        self._port = port
-
-    def getTransport(self):
-        return self._transport
-
-    def setTransport(self, transport):
-        self._transport = transport 
-
-    def __str__(self):
-        result = self._host if not self._host is None else "None"
-
-        if not self._port is None:
-            result += ':' + str(self._port)
-        if not self._transport is None:
-            result += ';transport=' + self._transport
-
         return result
 
 ############ headers ###########
@@ -727,6 +681,7 @@ class SipAddressHeader(Header, dict):
         return self.__address
 
     def setAddress(self, address):
+        assert isinstance(address, SipAddress)
         self.__address = address
 
     def __str__(self):
@@ -982,8 +937,6 @@ class SipViaHeader(Header, dict):
                         raise SipException()
                     self[name] = value
 
-
-
     def getBranch(self):
         """Gets the branch paramater of the SipViaHeader."""
         return self.get(SipViaHeader.PARAM_BRANCH)
@@ -1117,261 +1070,6 @@ class ProxyAuthenticateHeader(AuthenticationHeader):
 
     def __init__(self, body = None):
         AuthenticationHeader.__init__(self, 'Proxy-Authenticate', body)
-
-class SipParser():
-    @staticmethod
-    def parseListHeader(value):
-        """Parse lists as described by RFC 2068 Section 2.
-
-        In particular, parse comma-separated lists where the elements of
-        the list may include quoted-strings. A quoted-string could
-        contain a comma. A non-quoted string could have quotes in the
-        middle. Quotes are removed automatically after parsing.
-
-        >>> parse_list_header('token, "quoted value"')
-        ['token', 'quoted value']
-        """
-        result = []
-        for item in _parse_list_header(value):
-            if item[:1] == item[-1:] == '"':
-                item = unquote_header_value(item[1:-1])
-            result.append(item)
-        return result
-    
-    def parseSIPMessage(self, dataBuffer):
-        '''Parse sip message from the data buffer represented as bytes object
-        
-        Headers are interpreted as UTF-8 encoded text data, body is sequence of bytes 
-        '''
-
-        if dataBuffer is None:
-            raise SipException()
-
-        # locate a body
-        msgBody = None
-        for bodySeparator in (b"\r\n\r\n", b"\r\r", b"\n\n"):
-            bodyOffset = dataBuffer.find(bodySeparator)
-            if bodyOffset != -1:
-                msgBody = dataBuffer[bodyOffset + len(bodySeparator):]
-                dataBuffer = dataBuffer[:bodyOffset]
-                break
-        if msgBody is None:
-            raise SipException()
-
-        # split message into lines and put aside start line
-        lines = dataBuffer.decode('UTF-8').splitlines()
-
-        if len(lines) < 2:
-            raise SipException("Not enough header lines in message")
-
-        # parse first line and get instance of request or response object
-        msg = self.parseFirstLine(lines[0]) 
-
-        # parse headers
-        headersData = []
-        for line in lines[1:]:
-            # end on first empty line 
-            if len(line) == 0:
-                break
-
-            # process folded headers (split into more lines)
-            if line[0] in (' ', '\t'):
-                if len(headersData) == 0:
-                    raise SipException('Invalid whitespace characters found while parsing headers') 
-                lastHeaderData = headersData.pop() 
-                lastHeaderData[1] += ' ' + line.strip()
-                continue 
-            
-            headerParts = re.search('([^:]+) *:([ \t]*)(.+)', line)
-            if headerParts is None:
-                raise SipException('Bad header: %s' % line)
-            headerName = headerParts.group(1)
-            headerValIndent = headerParts.group(2)
-            headerValue = headerParts.group(3)
-
-            # convert 2nd type of multiline headers into one-line header
-            # h1: xxx
-            # h1:  yyy
-            # should be parsed as h1: xxx yyy
-            if len(headersData) > 0:
-                # get previous header
-                lastHeaderDataIx = len(headersData) - 1
-                lastHeaderData = headersData[lastHeaderDataIx]
-                # if header name matches and indent of this header is greater than prvious 
-                if lastHeaderData[0] == headerName and len(lastHeaderData[2]) < len(headerValIndent):
-                    headersData[lastHeaderDataIx][1] += ', ' + headerValue.strip() 
-                    #print headersData[lastHeaderDataIx][1] 
-                    continue
-
-            headersData.append([headerName, headerValue, headerValIndent])
-
-        #for hd in headersData:
-        #    print hd
-
-        # parse individual headers
-        contentLengthHeader = None
-        for headerData in headersData:
-            headers = self.parseHeader(headerData[0], headerData[1])
-            #print headers
-            for header in headers:
-                if isinstance(header, ContentLengthHeader):
-                    contentLengthHeader = header
-                msg.addHeader(header)
-
-        if contentLengthHeader is not None:
-            contentLength = contentLengthHeader.getContentLength()  
-            if contentLength != len(msgBody):
-                raise SipException("Body length differs from value of Content-length header")
-        elif msgBody is not None:
-            if len(msgBody) > 0:
-                raise SipException("Body without Content-length header found.")
-
-        msg.setContent(msgBody)
-
-        return msg
-
-    def parseFirstLine(self, str):
-        result = None
-
-        methodNames = Sip.getMethodNames()
-
-        parts = str.split(' ', 2) 
-        if len(parts) != 3:
-            raise SipException()    
-
-        # check if message is request
-        if parts[0].strip() in methodNames:
-            # check sip version string
-            sipVersion = self.parseSipVersion(parts[2])
-
-            # parse uri 
-            requestUri = self.parseUri(parts[1])
-
-            result = SipRequest()
-            result.setMethod(parts[0].strip())
-            result.setRequestUri(requestUri)
-            result.setSipVersion(sipVersion)
-
-        # check if message is response 
-        elif parts[1].isdigit():
-            sipVersion = self.parseSipVersion(parts[0])
-
-            result = SipResponse()
-            result.setStatusCode(int(parts[1]))
-            result.setReasonPhrase(parts[2].strip())
-            result.setSipVersion(sipVersion)
-        else:
-            raise SipException()
-
-        return result
-
-    def parseHeader(self, headerName, headerValues):
-        result = []
-        headerValues = headerValues.strip()
-        # check for multiple header values (comma separated). This is not allowed for some headers
-        # since their grammar doesn't follow form listed in SIP RFC 7.3
-        if headerName.lower() in ['www-authenticate', 'authorization', 'proxy-authenticate', 'proxy-Authorization']: 
-            headerValuesParts = [headerValues]
-        else:
-            headerValuesParts = re.split(r"[^\\],", headerValues) 
-        for headerValue in headerValuesParts:
-            result.append(HeaderFactory.createHeaderFromData(headerName, headerValue))
-
-        return result 
-
-    def parseSipVersion(self, str):
-        if str != 'SIP/2.0':
-            raise SipException()
-
-        return str
-
-    def parseUri(self, str):
-        result = None
-        if str.startswith('sip'):
-            result = SipUri(str)
-        elif str.startswith('tel'):
-            result = TelUri(str)
-        else:
-            raise SipException
-
-        return result
-
-class AddressFactory():
-    @staticmethod
-    def createUri(str):
-        result = None
-        if str.startswith('sip'):
-            result = SipUri(str)
-        elif str.startswith('tel'):
-            result = TelUri(str)
-        else:
-            result = Uri(str)
-
-        return result
-
-class HeaderFactory():
-    HEADER_NAMES = {
-        'authentication-info' : AuthenticationInfoHeader,
-        'from' : SipFromHeader,
-        'contact': ContactHeader,
-        'content-type': ContentTypeHeader,
-        'content-length': ContentLengthHeader,
-        'call-id' : SipCallIdHeader,
-        'cseq' : SipCSeqHeader,
-        'to' : SipToHeader,
-        'via' : SipViaHeader,
-        'www-authenticate' : WwwAuthenticateHeader,
-        'proxy-authenticate' : ProxyAuthenticateHeader,
-        'authorization' : AuthorizationHeader}
-
-    COMPACT_FORMS = {
-        'f': 'from',
-        'c': 'content-type',
-        'i': 'call-id',
-        'l': 'content-length',
-        'm': 'contact',
-        't': 'to',
-        'v': 'via'}
-
-    @staticmethod
-    def createHeaderFromData(name, body):
-        id = name.lower()
-
-        if name in HeaderFactory.COMPACT_FORMS:
-            id = HeaderFactory.COMPACT_FORMS[name]
-        
-        if id in HeaderFactory.HEADER_NAMES:
-            result = HeaderFactory.HEADER_NAMES[id](body)
-        else:
-            result = Header(name, body)
-
-        return result
-
-    def createFromHeader(self, address, tag = None):
-        """Creates a new FromHeader based on the newly supplied address and tag values."""
-        result = SipFromHeader()
-        result.setAddress(address)
-        if tag is not None:
-            result.setTag(tag)
-        return result
-
-    def createToHeader(self, address, tag = None):
-        """Creates a new ToHeader based on the newly supplied address and tag values."""
-        result = SipToHeader()
-        result.setAddress(address)
-        if tag is not None:
-            result.setTag(tag)
-        return result
-
-    @staticmethod
-    def createRouteFromRecordRoute(recordRouteHeader):
-        '''Creates RouteHeader from RecordRouteHeader (deep copy)'''
-        result = SipRouteHeader()
-        result.setAddress(copy.deepcopy(recordRouteHeader.getAddress()))
-        for param in recordRouteHeader:
-            result[param] = recordRouteHeader.get(param)
-
-        return result
 
 ######## messages ################
 
@@ -1601,7 +1299,272 @@ class SipResponse(SipMessage):
     def getFirstLine(self):
         return 'SIP/2.0 ' + str(self._statusCode) + ' ' + str(self._reasonPhrase)
 
+######## parser ################
+
+class SipParser():
+    @staticmethod
+    def parseListHeader(value):
+        """Parse lists as described by RFC 2068 Section 2.
+
+        In particular, parse comma-separated lists where the elements of
+        the list may include quoted-strings. A quoted-string could
+        contain a comma. A non-quoted string could have quotes in the
+        middle. Quotes are removed automatically after parsing.
+
+        >>> parse_list_header('token, "quoted value"')
+        ['token', 'quoted value']
+        """
+        result = []
+        for item in _parse_list_header(value):
+            if item[:1] == item[-1:] == '"':
+                item = unquote_header_value(item[1:-1])
+            result.append(item)
+        return result
+    
+    def parseSIPMessage(self, dataBuffer):
+        '''Parse sip message from the data buffer represented as bytes object
+        
+        Headers are interpreted as UTF-8 encoded text data, body is sequence of bytes 
+        '''
+
+        if dataBuffer is None:
+            raise SipException()
+
+        # locate a body
+        msgBody = None
+        for bodySeparator in (b"\r\n\r\n", b"\r\r", b"\n\n"):
+            bodyOffset = dataBuffer.find(bodySeparator)
+            if bodyOffset != -1:
+                msgBody = dataBuffer[bodyOffset + len(bodySeparator):]
+                dataBuffer = dataBuffer[:bodyOffset]
+                break
+        if msgBody is None:
+            raise SipException()
+
+        # split message into lines and put aside start line
+        lines = dataBuffer.decode('UTF-8').splitlines()
+
+        if len(lines) < 2:
+            raise SipException("Not enough header lines in message")
+
+        # parse first line and get instance of request or response object
+        msg = self.parseFirstLine(lines[0]) 
+
+        # parse headers
+        headersData = []
+        for line in lines[1:]:
+            # end on first empty line 
+            if len(line) == 0:
+                break
+
+            # process folded headers (split into more lines)
+            if line[0] in (' ', '\t'):
+                if len(headersData) == 0:
+                    raise SipException('Invalid whitespace characters found while parsing headers') 
+                lastHeaderData = headersData.pop() 
+                lastHeaderData[1] += ' ' + line.strip()
+                continue 
+            
+            headerParts = re.search('([^:]+) *:([ \t]*)(.+)', line)
+            if headerParts is None:
+                raise SipException('Bad header: %s' % line)
+            headerName = headerParts.group(1)
+            headerValIndent = headerParts.group(2)
+            headerValue = headerParts.group(3)
+
+            # convert 2nd type of multiline headers into one-line header
+            # h1: xxx
+            # h1:  yyy
+            # should be parsed as h1: xxx yyy
+            if len(headersData) > 0:
+                # get previous header
+                lastHeaderDataIx = len(headersData) - 1
+                lastHeaderData = headersData[lastHeaderDataIx]
+                # if header name matches and indent of this header is greater than prvious 
+                if lastHeaderData[0] == headerName and len(lastHeaderData[2]) < len(headerValIndent):
+                    headersData[lastHeaderDataIx][1] += ', ' + headerValue.strip() 
+                    #print headersData[lastHeaderDataIx][1] 
+                    continue
+
+            headersData.append([headerName, headerValue, headerValIndent])
+
+        #for hd in headersData:
+        #    print hd
+
+        # parse individual headers
+        contentLengthHeader = None
+        for headerData in headersData:
+            headers = self.parseHeader(headerData[0], headerData[1])
+            #print headers
+            for header in headers:
+                if isinstance(header, ContentLengthHeader):
+                    contentLengthHeader = header
+                msg.addHeader(header)
+
+        if contentLengthHeader is not None:
+            contentLength = contentLengthHeader.getContentLength()  
+            if contentLength != len(msgBody):
+                raise SipException("Body length differs from value of Content-length header")
+        elif msgBody is not None:
+            if len(msgBody) > 0:
+                raise SipException("Body without Content-length header found.")
+
+        msg.setContent(msgBody)
+
+        return msg
+
+    def parseFirstLine(self, str):
+        result = None
+
+        methodNames = Sip.getMethodNames()
+
+        parts = str.split(' ', 2) 
+        if len(parts) != 3:
+            raise SipException()    
+
+        # check if message is request
+        if parts[0].strip() in methodNames:
+            # check sip version string
+            sipVersion = self.parseSipVersion(parts[2])
+
+            # parse uri 
+            requestUri = self.parseUri(parts[1])
+
+            result = SipRequest()
+            result.setMethod(parts[0].strip())
+            result.setRequestUri(requestUri)
+            result.setSipVersion(sipVersion)
+
+        # check if message is response 
+        elif parts[1].isdigit():
+            sipVersion = self.parseSipVersion(parts[0])
+
+            result = SipResponse()
+            result.setStatusCode(int(parts[1]))
+            result.setReasonPhrase(parts[2].strip())
+            result.setSipVersion(sipVersion)
+        else:
+            raise SipException()
+
+        return result
+
+    def parseHeader(self, headerName, headerValues):
+        result = []
+        headerValues = headerValues.strip()
+        # check for multiple header values (comma separated). This is not allowed for some headers
+        # since their grammar doesn't follow form listed in SIP RFC 7.3
+        if headerName.lower() in ['www-authenticate', 'authorization', 'proxy-authenticate', 'proxy-Authorization']: 
+            headerValuesParts = [headerValues]
+        else:
+            headerValuesParts = re.split(r"[^\\],", headerValues) 
+        for headerValue in headerValuesParts:
+            result.append(HeaderFactory.createHeaderFromData(headerName, headerValue))
+
+        return result 
+
+    def parseSipVersion(self, str):
+        if str != 'SIP/2.0':
+            raise SipException()
+
+        return str
+
+    def parseUri(self, str):
+        result = None
+        if str.startswith('sip'):
+            result = SipUri(str)
+        elif str.startswith('tel'):
+            result = TelUri(str)
+        else:
+            raise SipException
+
+        return result
+
+######## factories ################
+
+class AddressFactory():
+    @staticmethod
+    def createUri(str):
+        result = None
+        if str.startswith('sip'):
+            result = SipUri(str)
+        elif str.startswith('tel'):
+            result = TelUri(str)
+        else:
+            result = Uri(str)
+
+        return result
+
+class HeaderFactory():
+    HEADER_NAMES = {
+        'authentication-info' : AuthenticationInfoHeader,
+        'from' : SipFromHeader,
+        'contact': ContactHeader,
+        'content-type': ContentTypeHeader,
+        'content-length': ContentLengthHeader,
+        'call-id' : SipCallIdHeader,
+        'cseq' : SipCSeqHeader,
+        'to' : SipToHeader,
+        'via' : SipViaHeader,
+        'www-authenticate' : WwwAuthenticateHeader,
+        'proxy-authenticate' : ProxyAuthenticateHeader,
+        'authorization' : AuthorizationHeader}
+
+    COMPACT_FORMS = {
+        'f': 'from',
+        'c': 'content-type',
+        'i': 'call-id',
+        'l': 'content-length',
+        'm': 'contact',
+        't': 'to',
+        'v': 'via'}
+
+    @staticmethod
+    def createHeaderFromData(name, body):
+        id = name.lower()
+
+        if name in HeaderFactory.COMPACT_FORMS:
+            id = HeaderFactory.COMPACT_FORMS[name]
+        
+        if id in HeaderFactory.HEADER_NAMES:
+            result = HeaderFactory.HEADER_NAMES[id](body)
+        else:
+            result = Header(name, body)
+
+        return result
+
+    def createFromHeader(self, address, tag = None):
+        """Creates a new FromHeader based on the newly supplied address and tag values."""
+        result = SipFromHeader()
+        result.setAddress(address)
+        if tag is not None:
+            result.setTag(tag)
+        return result
+
+    def createToHeader(self, address, tag = None):
+        """Creates a new ToHeader based on the newly supplied address and tag values."""
+        result = SipToHeader()
+        result.setAddress(address)
+        if tag is not None:
+            result.setTag(tag)
+        return result
+
+    @staticmethod
+    def createRouteFromRecordRoute(recordRouteHeader):
+        '''Creates RouteHeader from RecordRouteHeader (deep copy)'''
+        result = SipRouteHeader()
+        result.setAddress(copy.deepcopy(recordRouteHeader.getAddress()))
+        for param in recordRouteHeader:
+            result[param] = recordRouteHeader.get(param)
+
+        return result
+
 class MessageFactory():
+    """Factory for SIP messages (requests and responses)"""
+
+    @staticmethod
+    def duplicateMessage(msg):
+        return copy.deepcopy(msg)
+
     @staticmethod
     def createRequest(requestUri = None, method = None):
         """Creates a new Request message"""
@@ -1625,8 +1588,7 @@ class MessageFactory():
 
     @staticmethod
     def createRequestRegister(user):
-        if not isinstance(user, SipAddress):
-            raise SipException("Invalid argument format")
+        assert isinstance(user, SipAddress)
 
         requestUri = SipUri('sip:%s' % user.getUri().getHost())
 
@@ -1646,15 +1608,8 @@ class MessageFactory():
         result.addHeader(SipCallIdHeader(SipUtils.generateCallIdentifier()))
 
         result.addHeader(SipCSeqHeader('1 REGISTER'))
-        #viaHeader = SipViaHeader()
-        #viaHeader.setTransport(hop.getTransport())
-        #viaHeader.setHost(hop.getHost())
-        #viaHeader.setPort(hop.getPort())
-        #viaHeader.setBranch(SipUtils.generateBranchId());
-        #result.addHeader(viaHeader)
         result.addHeader(MaxForwardsHeader('70'))
         result.addHeader(ExpiresHeader('3600'))
-
 
         contentLengthHeader = ContentLengthHeader(0)
         result.addHeader(contentLengthHeader);
@@ -1662,52 +1617,21 @@ class MessageFactory():
         return result
 
     @staticmethod
-    def createRequestDeRegister(request):
-        result = copy.deepcopy(request)
-
-        expiresHeader = result.getHeaderByType(ExpiresHeader)
-        expiresHeader.setExpires(0)         
-
-        # Increment cseq
-        cSeq = result.getHeaderByType(SipCSeqHeader)
-        cSeq.setSeqNumber(cSeq.getSeqNumber() + 2)
-
-        # remove transaction related stuff
-        fromHeader = result.getHeaderByType(SipFromHeader)
-        if not fromHeader is None:
-            fromHeader.setTag(SipUtils.generateTag())
-
-        topmostViaHeader = result.getTopViaHeader()
-        if not topmostViaHeader is None:
-            topmostViaHeader.setBranch(None);
-
-        return result
-
-    @staticmethod
-    def createRequestInvite(user1, user2, hop):
-        if not isinstance(user1, SipAddress) or not isinstance(user2, SipAddress):
-            raise SipException("Invalid argument format")
+    def createRequestInvite(user, calledAddress):
+        assert isinstance(user, User)
+        assert isinstance(calledAddress, SipAddress)
         
-        user1Uri = user1.getUri()
-        user1SipAddress = SipAddress()
-        user1SipAddress.setUri(user1Uri)
-        user1SipAddress.setDisplayName(user1.getDisplayName())
-
-        user2Uri = user2.getUri()
-        user2SipAddress = SipAddress()
-        user2SipAddress.setUri(user2Uri)
-        user2SipAddress.setDisplayName(user2.getDisplayName())
-
         result = SipRequest()
         result.setMethod(Sip.METHOD_INVITE)
-        result.setRequestUri(user2Uri)
+        result.setRequestUri(calledAddress.getUri())
 
         fromHeader = SipFromHeader()
-        fromHeader.setAddress(user1SipAddress)
+        fromHeader.setAddress(user.getAddress())
         fromHeader.setTag(SipUtils.generateTag())
         result.addHeader(fromHeader)
+
         toHeader = SipToHeader()
-        toHeader.setAddress(user2SipAddress)
+        toHeader.setAddress(calledAddress)
         result.addHeader(toHeader)
 
         result.addHeader(SipCallIdHeader(SipUtils.generateCallIdentifier()))
@@ -1717,25 +1641,7 @@ class MessageFactory():
         viaHeader.setBranch(SipUtils.generateBranchId());
         result.addHeader(viaHeader)
         result.addHeader(MaxForwardsHeader('70'))
-
-        contactUri = SipUri()
-        contactUri.setScheme(Uri.SCHEME_SIP)
-        contactUri.setHost(hop.getHost());
-        contactUri.setPort(hop.getPort());
-        contactHeader = ContactHeader()
-        contactHeader.setAddress(contactUri)
-        result.addHeader(contactHeader);
-
-        # create authorization header
-        #authorizationHeader = AuthorizationHeader()
-        #authorizationHeader.setScheme('Digest')
-        #authorizationHeader.setUserName(user1.getAuthUserName())
-        #authorizationHeader.setRealm(user1.getSipDomain())
-        #authorizationHeader.setUri(str(user1Uri))
-        #authorizationHeader.setNonce('')
-        #authorizationHeader.setResponse('')
-        #result.addHeader(authorizationHeader)
-
+      
         result.setContent("v=0\no=UserA 2890844526 2890844526 IN IP4 anfdata.cz\ns=Session SDP\nc=IN IP4 100.101.102.103\nt=0 0\nm=audio 49170 RTP/AVP 0\na=rtpmap:0 PCMU/8000")
 
         result.addHeader(ContentLengthHeader(len(result.getContent())))
@@ -1763,59 +1669,37 @@ class MessageFactory():
         result.addHeader(cSeqHeader)
         return result
 
-
 ##### unit test cases #########################################################################
 
 class UnitTestCase(unittest.TestCase):
+    """Unit tests for message classes""" 
+
     def setUp(self):
         self.CONTENT = 'MyContent'
+
         self.USR_BOB_USERNAME =  'bob'
         self.USR_BOB_DISPLAYNAME =  'Bob'
         self.USR_BOB_DOMAIN =  'beloxi.com'
         self.USR_BOB_SHORT = 'sip:%s@%s' % (self.USR_BOB_USERNAME, self.USR_BOB_DOMAIN)
         self.USR_BOB_ADDR = '"%s" <%s>' % (self.USR_BOB_DISPLAYNAME, self.USR_BOB_SHORT)
 
+        self.USR_ALICE_USERNAME =  'alice'
+        self.USR_ALICE_DISPLAYNAME =  'Alice'
+        self.USR_ALICE_DOMAIN =  'atlanta.com'
+        self.USR_ALICE_SHORT = 'sip:%s@%s' % (self.USR_ALICE_USERNAME, self.USR_ALICE_DOMAIN)
+        self.USR_ALICE_ADDR = '"%s" <%s>' % (self.USR_ALICE_DISPLAYNAME, self.USR_ALICE_SHORT)
+
+        a = SipAddress('%s <sip: %s@%s>' % (self.USR_BOB_DISPLAYNAME, self.USR_BOB_USERNAME, self.USR_BOB_DOMAIN))
+        self.bob = User()
+        self.bob.setAddress(a)
+
+        a = SipAddress('%s <sip: %s@%s>' % (self.USR_ALICE_DISPLAYNAME, self.USR_ALICE_USERNAME, self.USR_ALICE_DOMAIN))
+        self.alice = User()
+        self.alice.setAddress(a)
+
         self.localHop = Hop()
         self.localHop.setHost('127.0.0.1')
         self.localHop.setPort(5060)
-
-        self.userBob = SipAddress()
-        self.userBobUri = SipUri()
-        self.userBobUri.setScheme(Uri.SCHEME_SIP)
-        self.userBobUri.setUser(self.USR_BOB_USERNAME)
-        self.userBobUri.setHost(self.USR_BOB_DOMAIN)
-        self.userBob.setDisplayName(self.USR_BOB_DISPLAYNAME)
-        self.userBob.setUri(self.userBobUri)
-
-        self.user1 = SipAddress()
-        self.user1Uri = SipUri()
-        self.user1Uri.setScheme(Uri.SCHEME_SIP)
-        self.user1Uri.setUser("ITSY000001")
-        self.user1Uri.setHost("brn10.iit.ims")
-        self.user1.setDisplayName('ITSY000001')
-        self.user1.setUri(self.user1Uri)
-
-        self.user2 = SipAddress()
-        self.user2Uri = SipUri()
-        self.user2Uri.setScheme(Uri.SCHEME_SIP)
-        self.user2Uri.setUser("ITSY000002")
-        self.user2Uri.setHost("brn10.iit.ims")
-        self.user2.setDisplayName('ITSY000002')
-        self.user2.setUri(self.user2Uri)
-
-    def testHop(self):
-        IP = "1.1.1.1"
-        h = Hop()
-        h = Hop("1.1.1.1")
-        self.assertEqual(h.getHost(), IP)
-        h = Hop("1.1.1.1:89")
-        self.assertEqual(h.getHost(), IP)
-        self.assertEqual(h.getPort(), 89)
-        h = Hop(("1.1.1.1", 89))
-        self.assertEqual(h.getHost(), IP)
-        self.assertEqual(h.getPort(), 89)
-        h.setTransport("udp")
-        self.assertEqual(h.getTransport(), "udp")
 
     def testSipUri(self):
         x = SipUri()
@@ -1831,6 +1715,10 @@ class UnitTestCase(unittest.TestCase):
         x = SipUri(addr)
         self.assertEqual(addr, str(x))
 
+        x = SipUri('sip: user@domain')
+        self.assertEqual(x.getUser(), 'user')
+        self.assertEqual(x.getHost(), 'domain')
+
     def testSipAddress(self):
         x = SipAddress()
         x.setDisplayName(self.USR_BOB_DISPLAYNAME)
@@ -1843,6 +1731,11 @@ class UnitTestCase(unittest.TestCase):
 
         x = SipAddress(self.USR_BOB_ADDR)
         self.assertEqual(str(x), self.USR_BOB_ADDR)
+
+        a = SipAddress('name <sip: user@domain>')
+        self.assertEqual(a.getDisplayName(), 'name')
+        self.assertEqual(a.getUri().getUser(), 'user')
+        self.assertEqual(a.getUri().getHost(), 'domain')
 
     def testSipMessage(self):
         m = SipMessage()
@@ -1909,7 +1802,7 @@ class UnitTestCase(unittest.TestCase):
     def testContactHeader(self):
         h = ContactHeader()
         self.assertRaises(SipException, str, h)
-        h.setAddress(self.userBob)
+        h.setAddress(self.bob.getAddress())
         self.assertEqual(str(h), 'Contact: ' + self.USR_BOB_ADDR)
 
         h.getAddress().setDisplayName(None)
@@ -1947,12 +1840,12 @@ class UnitTestCase(unittest.TestCase):
         str(h)
 
     def testMessageFactory(self):
-        inv = MessageFactory.createRequestInvite(self.user1, self.user2, self.localHop)
+        inv = MessageFactory.createRequestInvite(self.bob, self.alice.getAddress())
         ack = MessageFactory.createRequestAck(inv)
 
     def testHeaderFactory(self):
         rrh = SipRecordRouteHeader();
-        rrh.setAddress(self.user1)
+        rrh.setAddress(self.bob.getAddress())
         rrh["x"] = "val1"
         rrh["y"] = "val2"
         rh = HeaderFactory.createRouteFromRecordRoute(rrh)
@@ -1961,7 +1854,7 @@ class UnitTestCase(unittest.TestCase):
         self.assertEqual(rrh["y"], rh["y"])
 
     def testSipMessageDialogId(self):
-        msg = MessageFactory.createRequestInvite(self.user1, self.user2, self.localHop)
+        msg = MessageFactory.createRequestInvite(self.bob, self.alice.getAddress())
         self.assertEqual(msg.getDialogId(True), None)
         hFrom = msg.getFromHeader()
         hTo = msg.getToHeader()
@@ -2012,7 +1905,6 @@ class UnitTestCase(unittest.TestCase):
         authHeaders = msg.getHeadersByType(AuthenticationHeader)
         self.assertEquals(len(authHeaders), 1)
         authHeader = authHeaders[0]
-        print authHeader.getRealm()
 
 def suite():
     suite = unittest.TestLoader().loadTestsFromTestCase(UnitTestCase)

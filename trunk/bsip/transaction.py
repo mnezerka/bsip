@@ -50,10 +50,12 @@ class TransactionState():
         return 'none'
 
     def onRxResponse(self, rxData):
-        raise SipException('Abstract method')
+        #raise SipException('Abstract method')
+        pass
 
     def onRxRequest(self, rxData):
-        raise SipException('Abstract method')
+        #raise SipException('Abstract method')
+        pass
 
 class Transaction():
     """Transactions base class
@@ -193,14 +195,14 @@ class TranClientNonInviteStateNew(TransactionState):
         txData.transport = self.transaction.transport 
         txData.dest = self.transaction.destination
 
-        self.logger.debug('Sending initial request to %s:%d' % (self.transaction.destination))
+        self.logger.debug('Sending initial request to %s' % (self.transaction.destination))
 
         try:
             self.transaction.stack.sendStateless(txData)
             # change transaction state
             self.transaction.setState(TranClientNonInviteStateTrying(self.transaction))
         except:
-            self.transaction.setState(TranClientTerminated(self.transaction))
+            self.transaction.setState(TranClientNonInviteStateTerminated(self.transaction))
             raise
              
     def onRxResponse(self, rxData):
@@ -226,21 +228,18 @@ class TranClientNonInviteStateTrying(TransactionState):
             raise SipException('Unknow response code: %d' % code)
 
 class TranClientNonInviteStateProceeding(TransactionState):
-
     LOGGER_NAME = 'BSip.TranCliNonInv.Proceeding'
 
     def getId(self):
         return Transaction.STATE_PROCEEDING
 
 class TranClientNonInviteStateCompleted(TransactionState):
-
     LOGGER_NAME = 'BSip.TranCliNonInv.Completed'
 
     def getId(self):
         return Transaction.STATE_COMPLETED
 
 class TranClientNonInviteStateTerminated(TransactionState):
-
     LOGGER_NAME = 'BSip.TranCliNonInv.Terminated'
 
     def getId(self):
@@ -248,6 +247,115 @@ class TranClientNonInviteStateTerminated(TransactionState):
 
 ######### Invite Client Transaction
 
-# TODO
+class TranClientInvite(Transaction):
+    """Invite client transaction"""
+
+    LOGGER_NAME = 'BSip.TranCliInv'
+
+    def __init__(self, stack, module, request, destination, transport = None):
+        Transaction.__init__(self, stack, module, request, destination, transport)
+        self.branch = SipUtils.generateBranchId()
+        self.logger.info('New client (invite) transaction, branch: %s', self.branch)
+
+        # look for transport
+        if self.transport is None:
+            self.transport = self.stack.acquireTransport()
+
+        # fix message according to transport
+        self.stack.fixRequestForTransport(self.originalRequest, self.transport)
+
+        # set the branch id for the top via header.
+        topVia = self.originalRequest.getTopViaHeader()
+        topVia.setBranch(self.branch)
+
+        # register transaction in stack
+        transMgr = self.stack.getModule(TransactionMgr.ID)
+        if not transMgr is None:
+            transMgr.registerTransaction(self)
+
+        self.setState(TranClientInviteStateNew(self))
+
+    def sendRequest(self):
+        """Sends the Request which created this client transaction"""
+        self.state.sendRequest()
+
+    def onRxResponse(self, rxData):
+        self.logger.debug('Received SIP response')
+        self.state.onRxResponse(rxData)
+
+class TranClientInviteStateNew(TransactionState):
+    """Transaction state - new"""
+
+    LOGGER_NAME = 'BSip.TranCliInv.New'
+
+    def getId(self):
+        return Transaction.STATE_NEW 
+
+    def sendRequest(self):
+        txData = SipTxData()
+        txData.msg = self.transaction.originalRequest
+        txData.transport = self.transaction.transport 
+        txData.dest = self.transaction.destination
+
+        self.logger.debug('Sending initial request to %s' % (self.transaction.destination))
+
+        try:
+            self.transaction.stack.sendStateless(txData)
+            # change transaction state
+            self.transaction.setState(TranClientInviteStateCalling(self.transaction))
+        except:
+            self.transaction.setState(TranClientInviteStateTerminated(self.transaction))
+            raise
+
+class TranClientInviteStateCalling(TransactionState):
+    LOGGER_NAME = 'BSip.TranCliInv.Calling'
+
+    def getId(self):
+        return Transaction.STATE_CALLING
+
+    def onRxResponse(self, rxData):
+        self.transaction.lastResponse = rxData.msg
+        code = rxData.msg.getStatusCode()
+        if code / 100 == 1:
+            self.transaction.setState(TranClientInviteStateProceeding(self.transaction))
+        elif code / 100 in [2]:
+            self.transaction.setState(TranClientInviteStateTerminated(self.transaction))
+        elif code / 100 in [3, 4, 5, 6]:
+            self.transaction.setState(TranClientInviteStateCompleted(self.transaction))
+        else:
+            raise SipException('Unsupported response code: %d' % code)
+
+class TranClientInviteStateProceeding(TransactionState):
+    LOGGER_NAME = 'BSip.TranCliInv.Proceeding'
+
+    def getId(self):
+        return Transaction.STATE_PROCEEDING
+
+    def onRxResponse(self, rxData):
+        self.transaction.lastResponse = rxData.msg
+        code = rxData.msg.getStatusCode()
+        if code / 100 == 1:
+            # stay in proceeding, but inform higher layer
+            pass
+        elif code / 100 in [2]:
+            self.transaction.setState(TranClientInviteStateTerminated(self.transaction))
+        elif code / 100 in [3, 4, 5, 6]:
+            self.transaction.setState(TranClientInviteStateCompleted(self.transaction))
+        else:
+            raise SipException('Unsupported response code: %d' % code)
 
 
+class TranClientInviteStateCompleted(TransactionState):
+    LOGGER_NAME = 'BSip.TranCliInv.Completed'
+
+    def getId(self):
+        return Transaction.STATE_COMPLETED
+
+class TranClientInviteStateTerminated(TransactionState):
+    LOGGER_NAME = 'BSip.TranCliInv.Terminated'
+
+    def getId(self):
+        return Transaction.STATE_TERMINATED
+
+
+ 
