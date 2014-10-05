@@ -83,6 +83,54 @@ class Sip():
     RESPONSE_UNAUTHORIZED = 401
     RESPONSE_PROXY_AUTHENTICATION_REQUIRED = 407
 
+class Hop():
+    """Network address (host, port, transport) in format host[:port][;transport=udp|tcp]"""
+    def __init__(self, addr = None, transport = None):
+        self._host = None
+        self._port = None
+        self._transport = transport
+        if not addr is None:
+            self.parse(addr)
+
+    def parse(self, addr):
+        if type(addr) is tuple:
+            (self._host, self._port) = addr 
+        elif not addr is None:
+            parts = addr.split(':', 1)
+            if len(parts) == 1:
+                self._host = parts[0]
+            elif len(parts) == 2 and parts[1].isdigit():
+                self._host = parts[0]
+                self._port = int(parts[1])
+
+    def getHost(self):
+        return self._host
+ 
+    def setHost(self, host):
+        self._host = host
+
+    def getPort(self):
+        return self._port
+
+    def setPort(self, port):
+        self._port = port
+
+    def getTransport(self):
+        return self._transport
+
+    def setTransport(self, transport):
+        self._transport = transport 
+
+    def __str__(self):
+        result = self._host if not self._host is None else "None"
+
+        if not self._port is None:
+            result += ':' + str(self._port)
+        if not self._transport is None:
+            result += ';transport=' + self._transport
+
+        return result
+
 class SipUtils():
     DIGEST_POOL_SIZE = 20
 
@@ -178,6 +226,20 @@ class UnitTestCase(unittest.TestCase):
         SipUtils.generateCallIdentifier()
         SipUtils.generateTag()
         SipUtils.generateBranchId()
+
+    def testHop(self):
+        IP = "1.1.1.1"
+        h = Hop()
+        h = Hop("1.1.1.1")
+        self.assertEqual(h.getHost(), IP)
+        h = Hop("1.1.1.1:89")
+        self.assertEqual(h.getHost(), IP)
+        self.assertEqual(h.getPort(), 89)
+        h = Hop(("1.1.1.1", 89))
+        self.assertEqual(h.getHost(), IP)
+        self.assertEqual(h.getPort(), 89)
+        h.setTransport("udp")
+        self.assertEqual(h.getTransport(), "udp")
        
 def suite():
     suite = unittest.TestLoader().loadTestsFromTestCase(UnitTestCase)

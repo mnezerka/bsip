@@ -1,5 +1,6 @@
 import unittest
 import hashlib
+import sip 
 
 class User():
     def __init__(self):
@@ -7,7 +8,8 @@ class User():
         self._hop = None
         self._digestUserName = None
         self._digestPassword = None
-        self._proxy = None
+        self._proxyAddr = None
+        self._netAddr = None
 
     def __str__(self):
         return str(self._address)
@@ -24,11 +26,19 @@ class User():
     def getUri(self):
         return self._address.getUri() if not self._address is None else None
 
-    def setHop(self, hop):
-        self._hop = hop
+    def setNetAddr(self, hop):
+        assert isinstance(hop, sip.Hop)
+        self._netAddr = hop
 
-    def getHop(self):
-        return self._hop    
+    def getNetAddr(self):
+        return self._netAddr   
+
+    def setProxyAddr(self, hop):
+        assert isinstance(hop, sip.Hop)
+        self._proxyAddr = hop
+
+    def getProxyAddr(self):
+        return self._proxyAddr   
 
     def getDigestUser(self):
         """Returns the name of the user that these credentials relate to."""
@@ -50,12 +60,6 @@ class User():
         m = hashlib.md5()
         m.update(p)
         return m.hexdigest()
-
-    def setProxy(self, proxy):
-        self.proxy = proxy
-
-    def getProxy(self):
-        return self.proxy
 
 ##### unit test cases #########################################################################
 
