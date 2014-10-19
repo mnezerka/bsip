@@ -82,8 +82,9 @@ class DigestAuthenticator():
                 message.Header.PARAM_CNONCE: "xyz"})
 
             # store record to cache
-            self.logger.debug('storing authentication params to cache (id: %s)' % authHeaderRealm)
-            self.cachedCredentials[authHeaderRealm] = authParams
+            cacheId = '%d:%s' % (response.getStatusCode(), authHeaderRealm);
+            self.logger.debug('storing authentication params to cache (id: %s)' % cacheId)
+            self.cachedCredentials[cacheId] = authParams
             realmsProcessed += 1
 
         if realmsProcessed == 0:
@@ -133,9 +134,10 @@ class DigestAuthenticator():
         assert isinstance(request, message.SipRequest)
 
         # loop over all active realms
-        for authRealm in self.cachedCredentials:
-            self.logger.debug('Adding or updating auth headers for realm: %s' % authRealm)
-            authData =  self.cachedCredentials[authRealm]
+        for cacheId in self.cachedCredentials:
+            authData =  self.cachedCredentials[cacheId]
+            authRealm = authData[message.Header.PARAM_REALM]  
+            self.logger.debug('Adding or updating auth headers for realm: %s and status code: %d' % (authRealm, authData['response-code']))
             if authData['response-code'] == Sip.RESPONSE_UNAUTHORIZED: 
                 authHeaderClass = message.AuthorizationHeader
             elif authData['response-code'] == Sip.RESPONSE_PROXY_AUTHENTICATION_REQUIRED:

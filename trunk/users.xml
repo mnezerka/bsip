@@ -12,7 +12,7 @@
 		<display-name>Michal Nezerka</display-name>
 		<net-addr>192.168.0.104:5065</net-addr>
 		<digest-user>michal.nezerka</digest-user>
-		<digest-password>xxxxxxx</digest-password>
+		<digest-password>blueboy76</digest-password>
         <proxy>sip.iptel.org:5060</proxy>
 	</account>
 </accounts>

@@ -1154,6 +1154,11 @@ class SipMessage():
             result = toHeader.getTag()
         return result
 
+    def setToTag(self, tag):
+        toHeader = self.getToHeader()
+        if not toHeader is None:
+            result = toHeader.setTag(tag)
+
     def getToHeader(self):
         result = None
         for header in self.__headers:

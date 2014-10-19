@@ -46,7 +46,9 @@ if __name__ == '__main__':
     stack.registerModule(bsip.stack.ModuleSipLog())
     stack.registerModule(bsip.transaction.TransactionMgr())
 
-    aliceAddr  = bsip.message.SipAddress('Alice <sip:alice@atlanta.com>')
+    #aliceAddr  = bsip.message.SipAddress('Alice <sip:alice@atlanta.com>')
+    aliceAddr  = bsip.message.SipAddress('<sip:+420119107@iptel.org>')
+    aliceAddr  = bsip.message.SipAddress('<sip:530333584@sip.fayn.cz>')
 
     print "Registering user", user
     uac.register()
