@@ -1,5 +1,5 @@
 import logging
-from message import SipRequest
+from message import SipRequest, MessageFactory
 from stack import SipStack, SipTxData, Module
 from sip import SipUtils, SipException
 
@@ -40,11 +40,11 @@ class TransactionMgr(Module):
         self.logger.debug('Registered transaction with id: %s' % transaction.getId())
 
 class TransactionState():
-    LOGGER_NAME = 'BSip.TranState.None'
+    LOGGER_NAME = 'BSip.TranState'
     def __init__(self, transaction):
         assert isinstance(transaction, Transaction)
         self.transaction = transaction
-        self.logger = logging.getLogger(self.LOGGER_NAME)
+        self.logger = logging.getLogger(self.LOGGER_NAME + "." + self.getId())
 
     def getId(self):
         return 'none'
@@ -95,7 +95,6 @@ class Transaction():
     # For UAS/UAC, will be destroyed now.
     STATE_DESTROYED = 'destroyed'
 
-
     def __init__(self, stack, module, request, destination, transport = None):
         """Constructor"""
 
@@ -142,6 +141,12 @@ class Transaction():
         if not self.lastResponse is None:
             result = self.lastResponse.getStatusCode()
         return result
+
+    def getLastResponse(self):
+        return self.lastResponse
+
+    def getOriginalRequest(self):
+        return self.originalRequest
 
 ######### Non Invite Client Transaction
 
@@ -283,6 +288,18 @@ class TranClientInvite(Transaction):
         self.logger.debug('Received SIP response')
         self.state.onRxResponse(rxData)
 
+    def sendAck(self):
+        """Creates a new Ack message for current INVITE request."""
+        ackRequest = MessageFactory.createRequestAck(self.getOriginalRequest())
+
+        txData = SipTxData()
+        txData.msg = ackRequest 
+        txData.transport = self.transport 
+        txData.dest = self.destination
+
+        self.logger.debug('Sending ACK to %s' % (self.destination))
+        self.stack.sendStateless(txData)
+
 class TranClientInviteStateNew(TransactionState):
     """Transaction state - new"""
 
@@ -321,7 +338,11 @@ class TranClientInviteStateCalling(TransactionState):
         elif code / 100 in [2]:
             self.transaction.setState(TranClientInviteStateTerminated(self.transaction))
         elif code / 100 in [3, 4, 5, 6]:
-            self.transaction.setState(TranClientInviteStateCompleted(self.transaction))
+            try:
+                self.transaction.sendAck()
+                self.transaction.setState(TranClientInviteStateCompleted(self.transaction))
+            except:
+                self.transaction.setState(TranClientInviteStateTerminated(self.transaction))
         else:
             raise SipException('Unsupported response code: %d' % code)
 
@@ -340,10 +361,14 @@ class TranClientInviteStateProceeding(TransactionState):
         elif code / 100 in [2]:
             self.transaction.setState(TranClientInviteStateTerminated(self.transaction))
         elif code / 100 in [3, 4, 5, 6]:
-            self.transaction.setState(TranClientInviteStateCompleted(self.transaction))
+            try:
+                print "sending ACK"
+                self.transaction.sendAck()
+                self.transaction.setState(TranClientInviteStateCompleted(self.transaction))
+            except:
+                self.transaction.setState(TranClientInviteStateTerminated(self.transaction))
         else:
             raise SipException('Unsupported response code: %d' % code)
-
 
 class TranClientInviteStateCompleted(TransactionState):
     LOGGER_NAME = 'BSip.TranCliInv.Completed'
@@ -351,6 +376,18 @@ class TranClientInviteStateCompleted(TransactionState):
     def getId(self):
         return Transaction.STATE_COMPLETED
 
+    def onRxResponse(self, rxData):
+        self.transaction.lastResponse = rxData.msg
+        code = rxData.msg.getStatusCode()
+        # just send ACK for all 300-699 responses and handle transport errors
+        if code / 100 in [3, 4, 5, 6]:
+            try:
+                self.transaction.sendAck()
+            except:
+                self.transaction.setState(TranClientInviteStateTerminated(self.transaction))
+        else:
+            raise SipException('Unsupported response code: %d' % code)
+   
 class TranClientInviteStateTerminated(TransactionState):
     LOGGER_NAME = 'BSip.TranCliInv.Terminated'
 

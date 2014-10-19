@@ -36,19 +36,15 @@ class SipModuleRegistration(bsip.stack.Module):
 
     # Called on rx request
     def onRxRequest(self, rxData):
-        print 'Received SIP request'
-        print 'Sending SIP response'
         response = stack.MessageFactory.createResponse(200, rxData.msg)
         #txData.msg = stack.MessageFactory.createRequestRegister(user.getAddress())
         return True 
 
     # Called on rx response
     def onRxResponse(self, rxData):
-        print 'Received SIP response'
         return False
 
     def register(self, user):
-        print 'Registering user', user
         txData = stack.SipTxData()
         txData.msg = stack.MessageFactory.createRequestRegister(user.getAddress())
         txData.transport = self.stack.acquireTransport(stack.Sip.TRANSPORT_TCP)
@@ -108,9 +104,6 @@ class BSip(cmd.Cmd):
         self.user.setUri(user1Uri)
         #self.user.setProxy(('127.0.0.1', 5060))
         self.user.setProxy(('sip.iptel.org', 5060))
-
-    def do_greet(self, line):
-        print "hello"
 
     def do_exit(self, line):
         self.stackThread.stop()

@@ -19,6 +19,7 @@ class UAC(stack.Module):
 
     STATE_NOT_REGISTERED = 'not-registered'
     STATE_REGISTERING = 'registering'
+    STATE_AUTH  = 'auth'
     STATE_REGISTERED = 'registered'
     STATE_DEREGISTERING = 'de-registering'
     STATE_CALLING = 'calling'
@@ -31,6 +32,8 @@ class UAC(stack.Module):
         self.digestAuthenticator = auth.DigestAuthenticator(user)
         self.state = UACNotRegistered(self)
         self.logger = logging.getLogger(self.LOGGER_NAME)
+        self.nextStateSuccessfull = None
+        self.nextStateFailed = None
 
     def getId(self):
         """Returns module identification"""
@@ -88,9 +91,13 @@ class UACNotRegistered(UACState):
         self.uac.logger.info('Registering user')
         regRequest = message.MessageFactory.createRequestRegister(self.uac.user.getAddress())
         trans = transaction.TranClientNonInvite(self.uac.stack, self.uac, regRequest, self.uac.user.getProxyAddr())
+
         trans.sendRequest()
+
+        self.uac.nextStateSuccessfull = UACRegistered(self.uac)
+        self.uac.nextStateFailed = UACNotRegistered(self.uac) 
         self.uac.setState(UACRegistering(self.uac))
-         
+
 class UACRegistering(UACState):
     """User is being registered"""
 
@@ -100,7 +107,7 @@ class UACRegistering(UACState):
     def onTranState(self, tran):
         if tran.state.getId() == Transaction.STATE_COMPLETED:
             self.uac.logger.debug("transaction completed with sip status code: %d" % tran.getLastStatusCode())
-
+ 
             # check if authentication is required
             if tran.getLastStatusCode() in [Sip.RESPONSE_UNAUTHORIZED, Sip.RESPONSE_PROXY_AUTHENTICATION_REQUIRED]: 
                 # response must be challenged for authentication data and new request must be sent
@@ -110,7 +117,15 @@ class UACRegistering(UACState):
                     regRequest2 = message.MessageFactory.duplicateMessage(tran.originalRequest)
                     self.uac.digestAuthenticator.setAuthenticationHeaders(regRequest2)
                     trans = transaction.TranClientNonInvite(self.uac.stack, self.uac, regRequest2, self.uac.user.getProxyAddr())
+
+                    # send auth request
                     trans.sendRequest()
+
+                    # prepare state stransitions
+                    self.uac.nextStateSuccessfull = UACRegistered(self.uac)
+                    self.uac.nextStateFailed = UACNotRegistered(self.uac) 
+                    self.uac.setState(UACAuth(self.uac))
+
                 except SipException:
                     self.uac.logger.debug('Authehtication failed')
                     self.uac.setState(UACNotRegistered(self.uac))
@@ -118,6 +133,28 @@ class UACRegistering(UACState):
                 self.uac.setState(UACRegistered(self.uac))
             else:
                 SipException('Unexpected reponse code: %d' % tran.getLastStatusCode())
+
+class UACAuth(UACState):
+    """User is being registered (auth phase)"""
+
+    def getId(self):
+        return UAC.STATE_AUTH
+
+    def onTranState(self, tran):
+        if tran.state.getId() == Transaction.STATE_COMPLETED:
+            self.uac.logger.debug("transaction completed with sip status code: %d" % tran.getLastStatusCode())
+
+            # check if authentication is required
+            if tran.getLastStatusCode() == Sip.RESPONSE_OK:
+                if self.uac.nextStateSuccessfull is None:
+                    SipException('No state defined for successfull auth');
+                self.uac.setState(self.uac.nextStateSuccessfull)
+            else:
+                if self.uac.nextStateFailed is None:
+                    SipException('No state defined for failed auth');
+
+                #SipException('Authentication failed, reponse code: %d' % tran.getLastStatusCode())
+                self.uac.setState(self.uac.nextStateFailed)
 
 class UACRegistered(UACState):
     """User is registered"""
@@ -184,14 +221,26 @@ class UACCalling(UACState):
                 # response must be challenged for authentication data and new request must be sent
                 try:
                     self.uac.digestAuthenticator.handleChallenge(tran.lastResponse)
+
                     # create new request with authentication data
                     inviteRequest2 = message.MessageFactory.duplicateMessage(tran.originalRequest)
+                    #toTag = tran.getLastResponse().getToTag()
+                    #inviteRequest2.setToTag(toTag)
                     self.uac.digestAuthenticator.setAuthenticationHeaders(inviteRequest2)
-                    trans = transaction.TranClientNonInvite(self.uac.stack, self.uac, inviteRequest2, self.uac.user.getProxyAddr())
+                    trans = transaction.TranClientInvite(self.uac.stack, self.uac, inviteRequest2, self.uac.user.getProxyAddr())
+
+                    # send auth request
                     trans.sendRequest()
+
+                    # prepare state stransitions
+                    self.uac.nextStateSuccessfull = UACCalling(self.uac)
+                    self.uac.nextStateFailed = UACRegistered(self.uac) 
+                    self.uac.setState(UACAuth(self.uac))
+
                 except SipException:
                     self.uac.logger.debug('Authehtication failed')
-                    self.uac.setState(UACNotRegistered(self.uac))
+                    self.uac.setState(UACCalling(self.uac))
+
             elif tran.getLastStatusCode() == Sip.RESPONSE_OK:
                 self.uac.setState(UACInCall(self.uac))
             else:
