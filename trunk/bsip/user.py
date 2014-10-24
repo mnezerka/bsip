@@ -15,12 +15,14 @@ class User():
         return str(self._address)
 
     def setAddress(self, address):
+        assert isinstance(address, sip.SipAddress)
         self._address = address
 
     def getAddress(self):
         return self._address
 
     def setUri(self, uri):
+        assert isinstance(uri, sip.Uri)
         self._address.setUri(uri)
 
     def getUri(self):
@@ -64,7 +66,6 @@ class User():
 ##### unit test cases #########################################################################
 
 class UnitTestCase(unittest.TestCase):
-    
     def testSipUtils(self):
         pass
        

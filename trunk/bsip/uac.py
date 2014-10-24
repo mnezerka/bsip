@@ -34,6 +34,7 @@ class UAC(stack.Module):
         self.logger = logging.getLogger(self.LOGGER_NAME)
         self.nextStateSuccessfull = None
         self.nextStateFailed = None
+        self.logger.info('Created UAC for user %s' % str(self.user))
 
     def getId(self):
         """Returns module identification"""
@@ -88,7 +89,7 @@ class UACNotRegistered(UACState):
         return UAC.STATE_NOT_REGISTERED
 
     def register(self):
-        self.uac.logger.info('Registering user')
+        self.uac.logger.info('Registering user %s' % str(self.uac.user.getAddress()))
         regRequest = message.MessageFactory.createRequestRegister(self.uac.user.getAddress())
         trans = transaction.TranClientNonInvite(self.uac.stack, self.uac, regRequest, self.uac.user.getProxyAddr())
 
