@@ -14,6 +14,7 @@ import sys
 import random
 import re
 
+import sip
 from sip import Sip
 from sip import SipUtils
 import message
@@ -545,10 +546,10 @@ class SipStack():
             request.addHeader(contactHeader);
 
         contactUri = message.SipUri()
-        contactUri.setScheme(message.Uri.SCHEME_SIP)
+        contactUri.setScheme(sip.Uri.SCHEME_SIP)
         contactUri.setHost(transport.hop.getHost())
         contactUri.setPort(transport.hop.getPort())
-        contactAddress = message.SipAddress()
+        contactAddress = sip.SipAddress()
         contactAddress.setUri(contactUri)
         contactHeader.setAddress(contactAddress)
 
