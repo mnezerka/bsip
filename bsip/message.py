@@ -956,6 +956,20 @@ class SipMessage():
             result = callIdHeader.getCallId() 
         return result
 
+    def setCallId(self, callId):
+        """Set call id in appropriate header. Raise exception if header doesn't exist"""
+        callIdHeader = self.getHeaderByType(SipCallIdHeader)
+        if callIdHeader is None:
+            raise SipException('Call-ID header is missing')
+        callIdHeader.setCallId(callId) 
+
+    def incCSeq(self):
+        """Increments CSeq header by one. Raise exception if header doesn't exist"""
+        hdr = self.getHeaderByType(SipCSeqHeader)
+        if hdr is None:
+            raise SipException('CSeq header is missing')
+        hdr.setSeqNumber(hdr.getSeqNumber() + 1)
+
 class SipRequest(SipMessage):
     """Sip Request"""
 

@@ -10,7 +10,7 @@ import user
 import auth
 import transaction
 from transaction import Transaction
-from sip import Sip, SipException
+from sip import Sip, SipException, SipUtils
 
 class UAC(stack.Module):
     """UAC module"""
@@ -116,6 +116,8 @@ class UACRegistering(UACState):
                     self.uac.digestAuthenticator.handleChallenge(tran.lastResponse)
                     # create new request with authentication data
                     regRequest2 = message.MessageFactory.duplicateMessage(tran.originalRequest)
+                    #regRequest2.setCallId(SipUtils.generateCallIdentifier())
+                    regRequest2.incCSeq()
                     self.uac.digestAuthenticator.setAuthenticationHeaders(regRequest2)
                     trans = transaction.TranClientNonInvite(self.uac.stack, self.uac, regRequest2, self.uac.user.getProxyAddr())
 
