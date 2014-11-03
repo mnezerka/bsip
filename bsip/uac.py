@@ -1,5 +1,3 @@
-#!/usr/bin/python
-
 import logging
 import time
 import cmd
@@ -20,6 +18,7 @@ class UAC(stack.Module):
     STATE_NOT_REGISTERED = 'not-registered'
     STATE_REGISTERING = 'registering'
     STATE_AUTH  = 'auth'
+    STATE_FAILED = 'failed'
     STATE_REGISTERED = 'registered'
     STATE_DEREGISTERING = 'de-registering'
     STATE_CALLING = 'calling'
@@ -35,6 +34,7 @@ class UAC(stack.Module):
         self.nextStateSuccessfull = None
         self.nextStateFailed = None
         self.logger.info('Created UAC for user %s' % str(self.user))
+        self.lastResponse = None
 
     def getId(self):
         """Returns module identification"""
@@ -59,7 +59,11 @@ class UAC(stack.Module):
 
     def onTranState(self, tran):
         self.logger.debug('Transaction state have changed to ' + tran.state.getId())
+        self.lastResponse = tran.getLastResponse()
         self.state.onTranState(tran)
+
+    def getLastResponse(self):
+        return self.lastResponse
 
 class UACState():
     """Base class for all UAC states"""
@@ -81,7 +85,13 @@ class UACState():
 
     def onTranState(self, tran):
         pass
-         
+
+class UACFailed(UACState):
+    """User is in failed state"""
+
+    def getId(self):
+        return UAC.STATE_FAILED
+
 class UACNotRegistered(UACState):
     """User is not registered"""
 
@@ -126,7 +136,7 @@ class UACRegistering(UACState):
 
                     # prepare state stransitions
                     self.uac.nextStateSuccessfull = UACRegistered(self.uac)
-                    self.uac.nextStateFailed = UACNotRegistered(self.uac) 
+                    self.uac.nextStateFailed = UACFailed(self.uac) 
                     self.uac.setState(UACAuth(self.uac))
 
                 except SipException:

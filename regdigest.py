@@ -36,10 +36,12 @@ if __name__ == '__main__':
     am = AccountManager()
     am.loadFromXml('users.xml')
 
-    user = am.getUserByUri(bsip.message.SipUri('sip:michal.nezerka@iptel.org'))  
+    #user = am.getUserByUri(bsip.message.SipUri('sip:michal.nezerka@iptel.org'))  
+    user = am.getUserByUri(bsip.message.SipUri('sip:bob@asterisk'))  
+    if user is None:
+        raise("Unknown user")
 
     tranUdp = bsip.stack.TransportUdp(stack, user.getNetAddr())
-
 
     uac = bsip.uac.UAC(user)
     stack.registerModule(uac)
@@ -58,12 +60,13 @@ if __name__ == '__main__':
         time.sleep(0.1)
         if uac.getState() == bsip.uac.UAC.STATE_REGISTERED:
             print "User registered"
-            print "Calling"
-            uac.call(aliceAddr)
-            #print "Deregistering user", user
-            #uac.deRegister()     
+            break
         elif uac.getState() == bsip.uac.UAC.STATE_NOT_REGISTERED:
-            print "User deregistered"
+            print "User not registered"
+            break
+        elif uac.getState() == bsip.uac.UAC.STATE_FAILED:
+            lr = uac.getLastResponse()
+            print "Failed (%d %s)" % (lr.getStatusCode(), lr.getReasonPhrase())
             break
 
     print "Finished"

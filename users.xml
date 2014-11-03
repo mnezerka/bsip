@@ -8,12 +8,12 @@
         <proxy>21.56.31.72:5060</proxy>
 	</account>
 	<account>
-		<sip-uri>sip:michal.nezerka@iptel.org</sip-uri>
-		<display-name>Michal Nezerka</display-name>
-		<net-addr>192.168.0.104:5065</net-addr>
-		<digest-user>michal.nezerka</digest-user>
-		<digest-password>blueboy76</digest-password>
-        <proxy>sip.iptel.org:5060</proxy>
+		<sip-uri>sip:bob@asterisk</sip-uri>
+		<display-name>Bob</display-name>
+		<net-addr>127.0.0.1:5065</net-addr>
+		<digest-user>bob</digest-user>
+		<digest-password>bob76</digest-password>
+        <proxy>127.0.0.1:5060</proxy>
 	</account>
 </accounts>
 
