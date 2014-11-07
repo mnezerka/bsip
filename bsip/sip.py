@@ -399,7 +399,7 @@ class Hop():
         return self._port
 
     def setPort(self, port):
-        self._port = port
+        self._port = int(port)
 
     def getTransport(self):
         return self._transport

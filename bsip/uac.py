@@ -22,7 +22,7 @@ class UAC(stack.Module):
     STATE_REGISTERED = 'registered'
     STATE_DEREGISTERING = 'de-registering'
     STATE_CALLING = 'calling'
-    STATE_IN_CALL = 'calling'
+    STATE_IN_CALL = 'in-call'
 
     def __init__(self, user):
         stack.Module.__init__(self)
@@ -99,8 +99,9 @@ class UACNotRegistered(UACState):
         return UAC.STATE_NOT_REGISTERED
 
     def register(self):
-        self.uac.logger.info('Registering user %s' % str(self.uac.user.getAddress()))
+        self.uac.logger.info('Registering user %s (proxy: %s)' % (str(self.uac.user.getAddress()),str(self.uac.user.getProxyAddr())))
         regRequest = message.MessageFactory.createRequestRegister(self.uac.user.getAddress())
+
         trans = transaction.TranClientNonInvite(self.uac.stack, self.uac, regRequest, self.uac.user.getProxyAddr())
 
         trans.sendRequest()
@@ -144,6 +145,8 @@ class UACRegistering(UACState):
                     self.uac.setState(UACNotRegistered(self.uac))
             elif tran.getLastStatusCode() == Sip.RESPONSE_OK:
                 self.uac.setState(UACRegistered(self.uac))
+            elif tran.getLastStatusCode() >= 200 and tran.getLastStatusCode() <= 699:
+                self.uac.setState(UACFailed(self.uac))
             else:
                 SipException('Unexpected reponse code: %d' % tran.getLastStatusCode())
 
@@ -267,5 +270,4 @@ class UACInCall(UACState):
 
     def getId(self):
         return UAC.STATE_IN_CALL
-
 

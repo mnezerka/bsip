@@ -47,14 +47,14 @@ class User():
         return self._digestUserName
 
     def setDigestUser(self, name):
-        self._digestUserName = name 
+        self._digestUserName = str(name) 
 
     def getDigestPassword(self):
         """Returns a password associated with this set of credentials."""
         return self._digestPassword
 
     def setDigestPassword(self, password):
-        self._digestPassword = password
+        self._digestPassword = str(password)
 
     def getDigestHash(self):
         """Get the MD5(userName:sipdomain:password)"""
