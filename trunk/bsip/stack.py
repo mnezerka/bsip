@@ -75,6 +75,13 @@ class IpDispatcher():
         self.sockets.append([socket, transport])
         self.socketsListening.append(socket)
 
+     # add transport sockets to global list of observed sockets
+    def unregisterListeningSocket(self, socket, transport):
+        """Unregister socket for IO operations in main loop"""
+        self.logger.debug('Unregistering socket %s for transport %s' % (socket, transport.getId()))
+        self.sockets.remove([socket, transport])
+        self.socketsListening.remove(socket)
+
     def getTransportForSocket(self, fd):
         """Get transport instance associated with socket"""
 
@@ -167,6 +174,10 @@ class Transport:
     def getViaHeader(self):
         return None
 
+    def destroy(self):
+        """Destroy transport"""
+        pass
+
 class TransportLoopback(Transport):
     """Loopback transport"""
 
@@ -236,6 +247,21 @@ class TransportUdp(Transport, IpSocketListener):
         topVia.setPort(self.hop.getPort())
         return topVia 
 
+    def destroy(self):
+        """Destroy transport"""
+
+        # unregister transport from transport manager
+        self.stack.transportManager.unregisterTransport(self)
+
+        if not self.socket is None:
+            # unregister socket from  ip dispatcher
+            self.stack.ipDispatcher.unregisterListeningSocket(self.socket, self)
+
+            # close socket
+            self.logger.debug('Closing listening UDP socket for address: ' + str(self.hop))
+            self.socket.close()
+            self.socket = None
+
 class TransportTcp(Transport, IpSocketListener):
     """TCP Socket Transport"""
     LOGGER_NAME = 'BSip.TransportTcp' 
@@ -296,6 +322,13 @@ class TransportTcp(Transport, IpSocketListener):
         topVia.setHost(self.localAddress)
         topVia.setPort(self.port)
         return topVia 
+
+    def destroy(self):
+        """Destroy transport"""
+        if not self.socket is None:
+            self.logger.debug('Closing listening UDP socket for address: ' + str(self.hop))
+            self.socket.close()
+            self.socket = None
 
 class Module():
     """Sip module base class"""
@@ -401,10 +434,16 @@ class TransportManager():
         self.logger = logging.getLogger(self.LOGGER_NAME)
 
     def registerTransport(self, transport):
-        """Create transport instance"""
+        """Register transport instance"""
         self.logger.debug('Registering transport %s' % transport.getId())
         if not transport.getId() in self.transports: 
             self.transports[transport.getId()] = transport
+
+    def unregisterTransport(self, transport):
+        """Unregister transport instance"""
+        self.logger.debug('Unregistering transport %s' % transport.getId())
+        if transport.getId() in self.transports: 
+            del self.transports[transport.getId()]
 
     def onRxData(self, rxData):
         self.logger.debug('Sip data of length %d received from transport %s' % (len(rxData.data), rxData.transport.getId()))
