@@ -15,5 +15,14 @@
 		<digest-password>bob76</digest-password>
         <proxy>127.0.0.1:5060</proxy>
 	</account>
+	<account>
+		<sip-uri>sip:alice@asterisk</sip-uri>
+		<display-name>Alice</display-name>
+		<net-addr>127.0.0.1:5066</net-addr>
+		<digest-user>alice</digest-user>
+		<digest-password>alice76</digest-password>
+        <proxy>127.0.0.1:5060</proxy>
+	</account>
+
 </accounts>
 
