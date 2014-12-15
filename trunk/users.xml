@@ -16,6 +16,14 @@
         <proxy>127.0.0.1:5060</proxy>
 	</account>
 	<account>
+		<sip-uri>sip:blue@127.0.0.1</sip-uri>
+		<display-name>Blue</display-name>
+		<net-addr>127.0.0.1:5065</net-addr>
+		<digest-user>blue</digest-user>
+		<digest-password>abcd</digest-password>
+        <proxy>127.0.0.1:5060</proxy>
+	</account>
+	<account>
 		<sip-uri>sip:alice@asterisk</sip-uri>
 		<display-name>Alice</display-name>
 		<net-addr>127.0.0.1:5066</net-addr>
@@ -23,6 +31,5 @@
 		<digest-password>alice76</digest-password>
         <proxy>127.0.0.1:5060</proxy>
 	</account>
-
 </accounts>
 
