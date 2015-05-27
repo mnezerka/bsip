@@ -1,0 +1,1 @@
+Lightweight implementation of SIP protocol written in Python language. The main purpose of this module is testing of various sip entities - proxies, ues, etc.
